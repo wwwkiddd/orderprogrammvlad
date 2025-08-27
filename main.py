@@ -74,35 +74,70 @@ DEFECTS = [
     "Другое (ввести вручную)",
 ]
 
-SERVICES = [
-    "Снятие/установка",
-    "Мойка",
-    "Разбортовка",
-    "Забортовка",
-    "Балансировка",
-    "Установка камеры",
-    "Ремонт камеры",
-    "Герметик",
-    "Ремонт покрышки пласт. №",
-    "Снятие запасного колеса",
-    "Вулканизация покрышки",
-    "Вентиль грузовой",
-    "Вентиль ремонтный",
-    "Вентиль легковой",
-    "Грибок №",
-    "Грузики",
-    "Удлинитель",
-    "Установка вентиля",
-    "Флипер",
-    "Утилизация",
-    "Камера",
-    "Подкачка",
-    "Жгут",
-    "Разгрузка и погрузка колеса",
-    "Срочность",
-]
+# Список услуг и соответствие названий берём из файла прайса
+SERVICES: list[str] = []
 
+# Базовая цена по умолчанию (если не найдено в таблице)
 FIXED_PRICE = 100
+
+# === Прайс из Excel ===
+
+def load_price_data() -> dict:
+    """Загружает прайс из файла price.xlsx в удобный словарь."""
+    price_file = DATA_DIR / "price.xlsx"
+    data = {
+        "truck": {"diameters": [], "services": {}},
+        "car": {"diameters": [], "services": {}},
+        "service_names": [],
+    }
+    try:
+        wb = load_workbook(price_file)
+        ws = wb.active
+    except Exception:
+        return data
+
+    # Диаметры берём как строки без лишних пробелов
+    data["truck"]["diameters"] = [str(c.value).strip() for c in ws[2][1:8] if c.value]
+    data["car"]["diameters"] = [str(c.value).strip() for c in ws[2][9:] if c.value]
+
+    row = 3
+    while True:
+        raw_name = ws.cell(row=row, column=1).value
+        if not raw_name:
+            break
+        name = str(raw_name).strip()
+        data["service_names"].append(name)
+        truck_prices = {}
+        for col, diam in enumerate(data["truck"]["diameters"], start=2):
+            val = ws.cell(row=row, column=col).value
+            if isinstance(val, str) and "/" in val:
+                parts = [p.strip() for p in val.split("/")]
+                if len(parts) == 2:
+                    try:
+                        truck_prices[diam] = (int(parts[0]), int(parts[1]))
+                    except ValueError:
+                        truck_prices[diam] = val
+            else:
+                truck_prices[diam] = val
+        car_prices = {}
+        for col, diam in enumerate(data["car"]["diameters"], start=10):
+            val = ws.cell(row=row, column=col).value
+            if isinstance(val, str) and "/" in val:
+                parts = [p.strip() for p in val.split("/")]
+                if len(parts) == 2:
+                    try:
+                        car_prices[diam] = (int(parts[0]), int(parts[1]))
+                    except ValueError:
+                        car_prices[diam] = val
+            else:
+                car_prices[diam] = val
+        data["truck"]["services"][name] = truck_prices
+        data["car"]["services"][name] = car_prices
+        row += 1
+    return data
+
+PRICE_DATA = load_price_data()
+SERVICES = PRICE_DATA.get("service_names", [])
 
 # === Работа с компаниями ===
 COL_NAME = "Компания"
@@ -165,10 +200,14 @@ def load_companies() -> tuple[dict, list[str]]:
     return companies, visible_names
 
 COMPANIES, ALL_COMPANY_NAMES = load_companies()
+PLATE_TO_COMPANY = {p: name for name, meta in COMPANIES.items() for p in meta["plates"]}
+ALL_PLATES = list(PLATE_TO_COMPANY.keys())
 
 def reload_companies_globals():
-    global COMPANIES, ALL_COMPANY_NAMES
+    global COMPANIES, ALL_COMPANY_NAMES, PLATE_TO_COMPANY, ALL_PLATES
     COMPANIES, ALL_COMPANY_NAMES = load_companies()
+    PLATE_TO_COMPANY = {p: name for name, meta in COMPANIES.items() for p in meta["plates"]}
+    ALL_PLATES = list(PLATE_TO_COMPANY.keys())
 
 # === Чек и текст суммы ===
 def ruble_suffix(n: int) -> str:
@@ -237,8 +276,9 @@ def _write_to_excel(ws, data: dict) -> int:
     total = 0
     for idx, service_name in enumerate(SERVICES):
         row = SERVICES_START_ROW + idx
-        qty = data["services"].get(service_name, 0)
-        price = FIXED_PRICE if qty > 0 else 0
+        info = data["services"].get(service_name)
+        qty = info["qty"] if info else 0
+        price = info["price"] if info else 0
         cost = qty * price
         ws[f"{COL_QTY}{row}"] = qty if qty else ""
         ws[f"{COL_PRICE}{row}"] = price if qty else ""
@@ -534,10 +574,14 @@ class WorkOrderApp:
         tb.Radiobutton(frm_customer, text="Частное лицо", variable=self.customer_type, value="Частное лицо", command=self._on_customer_type_changed).grid(row=0, column=0, sticky=NW, padx=4, pady=4)
         tb.Radiobutton(frm_customer, text="Компания", variable=self.customer_type, value="Компания", command=self._on_customer_type_changed).grid(row=0, column=1, sticky=NW, padx=4, pady=4)
 
-        tb.Label(frm_customer, text="Поиск по компаниям (Ctrl+F):").grid(row=1, column=0, sticky=NW, padx=4, pady=4)
+        self.search_mode = tk.StringVar(value="company")
+        tb.Radiobutton(frm_customer, text="По компании", variable=self.search_mode, value="company", command=lambda: apply_filter()).grid(row=1, column=0, sticky=NW, padx=4, pady=4)
+        tb.Radiobutton(frm_customer, text="По номеру", variable=self.search_mode, value="plate", command=lambda: apply_filter()).grid(row=1, column=1, sticky=NW, padx=4, pady=4)
+
+        tb.Label(frm_customer, text="Поиск (Ctrl+F):").grid(row=2, column=0, sticky=NW, padx=4, pady=4)
         self.company_query = tk.StringVar(value="")
         self.entry_company_query = tb.Entry(frm_customer, textvariable=self.company_query)
-        self.entry_company_query.grid(row=1, column=1, sticky="we", padx=4, pady=4)
+        self.entry_company_query.grid(row=2, column=1, sticky="we", padx=4, pady=4)
 
         def focus_search(event=None):
             self.entry_company_query.focus_set()
@@ -545,29 +589,38 @@ class WorkOrderApp:
         win.bind("<Control-f>", focus_search)
 
         def on_pick_company(name):
-            self.company_selected.set(name)
-            self._update_company_meta()
+            if self.search_mode.get() == "company":
+                self.company_selected.set(name)
+                self._update_company_meta()
+            else:
+                self.company_selected.set(PLATE_TO_COMPANY.get(name, ""))
+                self._update_company_meta()
+                self.plate_var.set(name)
+                self.plate_list.set(name)
 
         self.search_results = HighlightList(frm_customer, on_select=on_pick_company, keybind_parent=win)
-        self.search_results.grid(row=2, column=0, columnspan=2, sticky="we", padx=2, pady=(0,6))
+        self.search_results.grid(row=3, column=0, columnspan=2, sticky="we", padx=2, pady=(0,6))
 
-        tb.Label(frm_customer, text="Компания:").grid(row=3, column=0, sticky=NW, padx=4, pady=4)
+        tb.Label(frm_customer, text="Компания:").grid(row=4, column=0, sticky=NW, padx=4, pady=4)
         self.company_selected = tk.StringVar(value=(ALL_COMPANY_NAMES[0] if ALL_COMPANY_NAMES else ""))
         self.cmb_company = tb.Combobox(frm_customer, textvariable=self.company_selected, values=ALL_COMPANY_NAMES, state="readonly")
-        self.cmb_company.grid(row=3, column=1, sticky="we", padx=4, pady=4)
+        self.cmb_company.grid(row=4, column=1, sticky="we", padx=4, pady=4)
 
-        tb.Label(frm_customer, text="ИНН:").grid(row=4, column=0, sticky=NW, padx=4, pady=4)
+        tb.Label(frm_customer, text="ИНН:").grid(row=5, column=0, sticky=NW, padx=4, pady=4)
         self.company_inn_var = tk.StringVar(value="")
-        tb.Label(frm_customer, textvariable=self.company_inn_var, bootstyle="secondary").grid(row=4, column=1, sticky="w", padx=4, pady=4)
+        tb.Label(frm_customer, textvariable=self.company_inn_var, bootstyle="secondary").grid(row=5, column=1, sticky="w", padx=4, pady=4)
 
         def apply_filter(*_):
             q = self.company_query.get().strip().lower()
-            values = [name for name in ALL_COMPANY_NAMES if q in name.lower()] if q else list(ALL_COMPANY_NAMES)
-            self.cmb_company["values"] = values
-            if values:
-                self.cmb_company.set(values[0])
+            if self.search_mode.get() == "company":
+                values = [name for name in ALL_COMPANY_NAMES if q in name.lower()] if q else list(ALL_COMPANY_NAMES)
+                self.cmb_company["values"] = values
+                if values:
+                    self.cmb_company.set(values[0])
+                else:
+                    self.cmb_company.set("")
             else:
-                self.cmb_company.set("")
+                values = [p for p in ALL_PLATES if q in p.lower()] if q else list(ALL_PLATES)
             self.search_results.set_items(values[:50], q)
             self._update_company_meta()
 
@@ -588,6 +641,10 @@ class WorkOrderApp:
         tb.Label(frm_plate, text="Номер (для частного лица — вручную):").grid(row=0, column=0, sticky=NW, padx=4, pady=4)
         self.plate_entry.grid(row=1, column=0, sticky="we", padx=4, pady=4)
         self.plate_list.grid(row=1, column=1, sticky="we", padx=4, pady=4)
+
+        self.trailer_var = tk.StringVar()
+        tb.Label(frm_plate, text="Номер прицепа:").grid(row=2, column=0, sticky=NW, padx=4, pady=4)
+        tb.Entry(frm_plate, textvariable=self.trailer_var).grid(row=2, column=1, sticky="we", padx=4, pady=4)
 
         # Водитель
         frm_driver = tb.Labelframe(left, text="Ф.И.О. водителя", padding=8)
@@ -632,9 +689,19 @@ class WorkOrderApp:
         tb.Entry(frm_people, textvariable=self.mechanic).grid(row=1, column=1, sticky="we", padx=4, pady=4)
 
         # ===== Правая колонка =====
+        frm_vehicle = tb.Labelframe(right, text="Параметры", padding=8)
+        frm_vehicle.grid(row=0, column=0, sticky="we", **pad)
+        self.vehicle_type = tk.StringVar(value="car")
+        tb.Radiobutton(frm_vehicle, text="Легковой", variable=self.vehicle_type, value="car", command=self._update_diameters).grid(row=0, column=0, padx=4, pady=4, sticky=NW)
+        tb.Radiobutton(frm_vehicle, text="Грузовой", variable=self.vehicle_type, value="truck", command=self._update_diameters).grid(row=0, column=1, padx=4, pady=4, sticky=NW)
+        self.diameter_var = tk.StringVar()
+        self.cmb_diameter = tb.Combobox(frm_vehicle, textvariable=self.diameter_var, state="readonly")
+        self.cmb_diameter.grid(row=1, column=0, columnspan=2, sticky="we", padx=4, pady=4)
+        self.cmb_diameter.bind("<<ComboboxSelected>>", self._update_service_prices)
+
         frm_services = tb.Labelframe(right, text="Услуги", padding=8)
-        frm_services.grid(row=0, column=0, sticky="nsew", **pad)
-        right.grid_rowconfigure(0, weight=1)
+        frm_services.grid(row=1, column=0, sticky="nsew", **pad)
+        right.grid_rowconfigure(1, weight=1)
         frm_services.grid_columnconfigure(0, weight=1)
         frm_services.grid_rowconfigure(1, weight=1)
 
@@ -644,7 +711,8 @@ class WorkOrderApp:
         header.grid_columnconfigure(0, weight=1)
         tb.Label(header, text="Услуга").grid(row=0, column=0, sticky="w", padx=4, pady=2)
         tb.Label(header, text="Кол-во").grid(row=0, column=1, sticky="w", padx=4, pady=2)
-        tb.Label(header, text=f"Цена (шт) = {FIXED_PRICE}").grid(row=0, column=2, sticky="w", padx=4, pady=2)
+        tb.Label(header, text="Опция").grid(row=0, column=2, sticky="w", padx=4, pady=2)
+        tb.Label(header, text="Цена").grid(row=0, column=3, sticky="w", padx=4, pady=2)
 
         # Прокручиваемый список услуг
         svc = VScrollFrame(frm_services)
@@ -654,6 +722,8 @@ class WorkOrderApp:
 
         self.services_vars = {}
         self.services_qty = {}
+        self.services_price_labels = {}
+        self.service_option_vars = {}
         for i, name in enumerate(SERVICES, start=1):
             var = tk.IntVar(value=0)
             qty = tk.IntVar(value=0)
@@ -663,23 +733,42 @@ class WorkOrderApp:
                         q.set(1)
                     if not v.get():
                         q.set(0)
+                    self._update_service_prices()
                 return handler
             tb.Checkbutton(svc_inner, text=name, variable=var, command=_on_toggle_factory()).grid(row=i, column=0, sticky=NW, padx=4, pady=2)
-            tb.Spinbox(svc_inner, from_=0, to=999, textvariable=qty, width=6).grid(row=i, column=1, sticky=NW, padx=4, pady=2)
-            tb.Label(svc_inner, text=str(FIXED_PRICE)).grid(row=i, column=2, sticky=NW, padx=4, pady=2)
+            tb.Spinbox(svc_inner, from_=0, to=999, textvariable=qty, width=6, command=self._update_service_prices).grid(row=i, column=1, sticky=NW, padx=4, pady=2)
+            opt_var = None
+            if name == "Снятие, установка наружное/внутреннее":
+                opt_var = tk.StringVar(value="наружное")
+                cb = tb.Combobox(svc_inner, textvariable=opt_var, values=["наружное","внутреннее"], state="readonly", width=12)
+                cb.grid(row=i, column=2, sticky=NW, padx=4, pady=2)
+                cb.bind("<<ComboboxSelected>>", self._update_service_prices)
+            elif name == "Вентиль легковой (хром/черный)":
+                opt_var = tk.StringVar(value="чёрный")
+                cb = tb.Combobox(svc_inner, textvariable=opt_var, values=["чёрный","хром"], state="readonly", width=12)
+                cb.grid(row=i, column=2, sticky=NW, padx=4, pady=2)
+                cb.bind("<<ComboboxSelected>>", self._update_service_prices)
+            else:
+                tb.Label(svc_inner, text="").grid(row=i, column=2, sticky=NW, padx=4, pady=2)
+            price_lbl = tb.Label(svc_inner, text="")
+            price_lbl.grid(row=i, column=3, sticky=NW, padx=4, pady=2)
             svc_inner.grid_columnconfigure(0, weight=1)
             self.services_vars[name] = var
             self.services_qty[name] = qty
+            self.services_price_labels[name] = price_lbl
+            if opt_var:
+                self.service_option_vars[name] = opt_var
 
         # Кнопки действия (внизу правой панели)
         actions = tb.Frame(right)
-        actions.grid(row=1, column=0, sticky="we", **pad)
+        actions.grid(row=2, column=0, sticky="we", **pad)
         tb.Button(actions, text="Сформировать Excel (Ctrl+S)", bootstyle="success", command=self._build_xlsx_only).pack(side=LEFT, padx=6)
         tb.Button(actions, text="Сформировать PDF (Ctrl+P)", bootstyle="info", command=self._build_and_save).pack(side=LEFT, padx=6)
 
         # Инициализация
         self._on_customer_type_changed()
         self._update_company_meta()
+        self._update_diameters()
 
         # Корректное отключение trace/биндов при закрытии окна
         def _cleanup():
@@ -979,13 +1068,46 @@ class WorkOrderApp:
                 self.plate_entry.configure(state=NORMAL)
                 self.plate_list.configure(state=DISABLED)
 
-    def _collect_services(self) -> dict[str, int]:
+    def _update_diameters(self):
+        vt = "truck" if self.vehicle_type.get() == "truck" else "car"
+        values = PRICE_DATA.get(vt, {}).get("diameters", [])
+        if hasattr(self, "cmb_diameter"):
+            self.cmb_diameter["values"] = values
+            if values:
+                self.cmb_diameter.set(values[0])
+            else:
+                self.cmb_diameter.set("")
+        self._update_service_prices()
+
+    def _get_unit_price(self, service_name: str) -> int:
+        vt = "truck" if self.vehicle_type.get() == "truck" else "car"
+        diam = getattr(self, "diameter_var", tk.StringVar()).get()
+        prices = PRICE_DATA.get(vt, {}).get("services", {}).get(service_name, {})
+        price = prices.get(diam, 0)
+        if isinstance(price, tuple):
+            opt_var = self.service_option_vars.get(service_name)
+            if opt_var:
+                opt = opt_var.get()
+                if service_name == "Снятие, установка наружное/внутреннее":
+                    price = price[1] if opt == "внутреннее" else price[0]
+                elif service_name == "Вентиль легковой (хром/черный)":
+                    price = price[1] if opt == "хром" else price[0]
+        return int(price) if price else 0
+
+    def _update_service_prices(self, *_):
+        for name in SERVICES:
+            price = self._get_unit_price(name)
+            lbl = self.services_price_labels.get(name)
+            if lbl:
+                lbl.configure(text=str(price) if price else "")
+
+    def _collect_services(self) -> dict[str, dict]:
         selected = {}
         for name in SERVICES:
             var = self.services_vars[name]
             qty = max(0, int(self.services_qty[name].get()))
             if var.get() and qty > 0:
-                selected[name] = qty
+                selected[name] = {"qty": qty, "price": self._get_unit_price(name)}
         return selected
 
     def _validate(self) -> tuple[bool, str]:
@@ -1023,6 +1145,9 @@ class WorkOrderApp:
         else:
             customer_display = "Частное лицо"
             plate_value = self.plate_entry.get().strip()
+        trailer = self.trailer_var.get().strip()
+        if trailer:
+            plate_value = f"{plate_value}, {trailer}" if plate_value else trailer
 
         if self.defect_choice.get() == "Другое (ввести вручную)":
             defect_value = self.defect_custom.get().strip()
@@ -1037,6 +1162,8 @@ class WorkOrderApp:
             "issued_to": self.issued_to.get().strip(),
             "mechanic": self.mechanic.get().strip(),
             "services": self._collect_services(),
+            "vehicle_type": self.vehicle_type.get(),
+            "diameter": self.diameter_var.get(),
         }
         return data
 

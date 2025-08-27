@@ -74,6 +74,8 @@ DEFECTS = [
     "Другое (ввести вручную)",
 ]
 
+
+SERVICES: list[str] = []
 SERVICES = [
     "Снятие/установка",
     "Мойка",
@@ -107,6 +109,7 @@ SERVICE_NAME_MAP = {
     "Вентиль легковой": "Вентиль легковой (хром/черный)",
 }
 
+
 # Базовая цена по умолчанию (если не найдено в таблице)
 FIXED_PRICE = 100
 
@@ -115,13 +118,33 @@ FIXED_PRICE = 100
 def load_price_data() -> dict:
     """Загружает прайс из файла price.xlsx в удобный словарь."""
     price_file = DATA_DIR / "price.xlsx"
+
+    data = {
+        "truck": {"diameters": [], "services": {}},
+        "car": {"diameters": [], "services": {}},
+        "service_names": [],
+    }
     data = {"truck": {"diameters": [], "services": {}},
             "car": {"diameters": [], "services": {}}}
+
     try:
         wb = load_workbook(price_file)
         ws = wb.active
     except Exception:
         return data
+
+
+    # Диаметры берём как строки без лишних пробелов
+    data["truck"]["diameters"] = [str(c.value).strip() for c in ws[2][1:8] if c.value]
+    data["car"]["diameters"] = [str(c.value).strip() for c in ws[2][9:] if c.value]
+
+    row = 3
+    while True:
+        raw_name = ws.cell(row=row, column=1).value
+        if not raw_name:
+            break
+        name = str(raw_name).strip()
+        data["service_names"].append(name)
 
     # Диаметры
     data["truck"]["diameters"] = [c.value for c in ws[2][1:8] if c.value]
@@ -132,6 +155,7 @@ def load_price_data() -> dict:
         name = ws.cell(row=row, column=1).value
         if not name:
             break
+
         truck_prices = {}
         for col, diam in enumerate(data["truck"]["diameters"], start=2):
             val = ws.cell(row=row, column=col).value
@@ -162,6 +186,9 @@ def load_price_data() -> dict:
     return data
 
 PRICE_DATA = load_price_data()
+
+SERVICES = PRICE_DATA.get("service_names", [])
+
 
 # === Работа с компаниями ===
 COL_NAME = "Компания"
@@ -762,12 +789,18 @@ class WorkOrderApp:
             tb.Checkbutton(svc_inner, text=name, variable=var, command=_on_toggle_factory()).grid(row=i, column=0, sticky=NW, padx=4, pady=2)
             tb.Spinbox(svc_inner, from_=0, to=999, textvariable=qty, width=6, command=self._update_service_prices).grid(row=i, column=1, sticky=NW, padx=4, pady=2)
             opt_var = None
+            if name == "Снятие, установка наружное/внутреннее":
+
             if name == "Снятие/установка":
+
                 opt_var = tk.StringVar(value="наружное")
                 cb = tb.Combobox(svc_inner, textvariable=opt_var, values=["наружное","внутреннее"], state="readonly", width=12)
                 cb.grid(row=i, column=2, sticky=NW, padx=4, pady=2)
                 cb.bind("<<ComboboxSelected>>", self._update_service_prices)
+            elif name == "Вентиль легковой (хром/черный)":
+
             elif name == "Вентиль легковой":
+
                 opt_var = tk.StringVar(value="чёрный")
                 cb = tb.Combobox(svc_inner, textvariable=opt_var, values=["чёрный","хром"], state="readonly", width=12)
                 cb.grid(row=i, column=2, sticky=NW, padx=4, pady=2)
@@ -1106,16 +1139,24 @@ class WorkOrderApp:
     def _get_unit_price(self, service_name: str) -> int:
         vt = "truck" if self.vehicle_type.get() == "truck" else "car"
         diam = getattr(self, "diameter_var", tk.StringVar()).get()
+        prices = PRICE_DATA.get(vt, {}).get("services", {}).get(service_name, {})
+
         svc_name = SERVICE_NAME_MAP.get(service_name, service_name)
         prices = PRICE_DATA.get(vt, {}).get("services", {}).get(svc_name, {})
+
         price = prices.get(diam, 0)
         if isinstance(price, tuple):
             opt_var = self.service_option_vars.get(service_name)
             if opt_var:
                 opt = opt_var.get()
+
+                if service_name == "Снятие, установка наружное/внутреннее":
+                    price = price[1] if opt == "внутреннее" else price[0]
+                elif service_name == "Вентиль легковой (хром/черный)":
                 if service_name == "Снятие/установка":
                     price = price[1] if opt == "внутреннее" else price[0]
                 elif service_name == "Вентиль легковой":
+
                     price = price[1] if opt == "хром" else price[0]
         return int(price) if price else 0
 

@@ -1,7 +1,3 @@
-def is_trailer_plate(s: str) -> bool:
-    """Распознать прицеп по префиксу 'Прицеп' (без учёта регистра)."""
-    return str(s).strip().lower().startswith("прицеп")
-
 
 # -*- coding: utf-8 -*-
 
@@ -26,8 +22,6 @@ from openpyxl import load_workbook
 from num2words import num2words
 import pandas as pd
 import ttkbootstrap as tb
-from openpyxl.cell.cell import MergedCell
-
 
 # === Пути проекта ===
 BASE_DIR = Path(__file__).parent
@@ -116,7 +110,6 @@ COL_INN = "ИНН"
 COL_PLATES = "Номера"
 COL_PAY = "Оплата"
 
-
 def _normalize_company_df(df: pd.DataFrame) -> pd.DataFrame:
     # Поддержка разных заголовков (включая варианты вроде "Оплата (да/нет)")
     mapping = {}
@@ -139,7 +132,6 @@ def _normalize_company_df(df: pd.DataFrame) -> pd.DataFrame:
         df2[c] = df2[c].astype(str).fillna("").str.strip()
     return df2
 
-
 def read_companies_df() -> pd.DataFrame:
     try:
         df = pd.read_excel(COMPANIES_XLSX, dtype=str)
@@ -147,19 +139,15 @@ def read_companies_df() -> pd.DataFrame:
         df = pd.DataFrame(columns=[COL_NAME, COL_INN, COL_PLATES, COL_PAY])
     return _normalize_company_df(df)
 
-
 def write_companies_df(df: pd.DataFrame):
     # Сохраняем как есть, без сортировки — чтобы новые компании были в конце
     df.to_excel(COMPANIES_XLSX, index=False)
 
-
 def parse_plates(cell_value: str) -> list[str]:
     return [p.strip() for p in str(cell_value).split(",") if p.strip()]
 
-
 def join_plates(plates: list[str]) -> str:
     return ", ".join(sorted(set([p.strip() for p in plates if p.strip()])))
-
 
 def load_companies() -> tuple[dict, list[str]]:
     df = read_companies_df()
@@ -172,18 +160,15 @@ def load_companies() -> tuple[dict, list[str]]:
         pay = str(row[COL_PAY]).strip().lower()
         if name:
             companies[name] = {"inn": inn, "plates": plates, "pay": pay}
-            if pay in ("да", "yes", "true", "1"):
+            if pay in ("да","yes","true","1"):
                 visible_names.append(name)
     return companies, visible_names
 
-
 COMPANIES, ALL_COMPANY_NAMES = load_companies()
-
 
 def reload_companies_globals():
     global COMPANIES, ALL_COMPANY_NAMES
     COMPANIES, ALL_COMPANY_NAMES = load_companies()
-
 
 # === Чек и текст суммы ===
 def ruble_suffix(n: int) -> str:
@@ -197,11 +182,9 @@ def ruble_suffix(n: int) -> str:
         return "рубля"
     return "рублей"
 
-
 def make_total_text(total: int) -> str:
     words = num2words(total, lang='ru').capitalize()
     return f"{words} {ruble_suffix(total)}"
-
 
 # === Экспорт PDF ===
 def export_pdf_via_excel(xlsx_path: Path, pdf_path: Path, a5: bool = True, landscape: bool = False) -> bool:
@@ -223,7 +206,6 @@ def export_pdf_via_excel(xlsx_path: Path, pdf_path: Path, a5: bool = True, lands
     except Exception:
         return False
 
-
 def export_pdf_via_libreoffice(xlsx_path: Path, pdf_path: Path) -> bool:
     try:
         outdir = pdf_path.parent
@@ -237,7 +219,6 @@ def export_pdf_via_libreoffice(xlsx_path: Path, pdf_path: Path) -> bool:
         return False
     except Exception:
         return False
-
 
 # === Заполнение шаблона ===
 def _write_to_excel(ws, data: dict) -> int:
@@ -268,7 +249,6 @@ def _write_to_excel(ws, data: dict) -> int:
     ws[CELL_TOTAL_TEXT] = make_total_text(total)
     return total
 
-
 def fill_excel_only(data: dict) -> Path:
     if not TEMPLATE_XLSX.exists():
         raise FileNotFoundError(f"Не найден шаблон: {TEMPLATE_XLSX}")
@@ -279,7 +259,6 @@ def fill_excel_only(data: dict) -> Path:
     _write_to_excel(ws, data)
     wb.save(xlsx_out)
     return xlsx_out
-
 
 def fill_excel_and_export_pdf(data: dict) -> tuple[Path, Path]:
     if not TEMPLATE_XLSX.exists():
@@ -293,10 +272,8 @@ def fill_excel_and_export_pdf(data: dict) -> tuple[Path, Path]:
     wb.save(xlsx_out)
     ok = export_pdf_via_excel(xlsx_out, pdf_out, a5=True, landscape=False)
     if not ok and not export_pdf_via_libreoffice(xlsx_out, pdf_out):
-        raise RuntimeError(
-            "Не удалось экспортировать в PDF. Проверьте наличие Microsoft Excel (или LibreOffice в PATH).")
+        raise RuntimeError("Не удалось экспортировать в PDF. Проверьте наличие Microsoft Excel (или LibreOffice в PATH).")
     return xlsx_out, pdf_out
-
 
 # === Скролл-фреймы ===
 class VScrollFrame(ttk.Frame):
@@ -311,7 +288,7 @@ class VScrollFrame(ttk.Frame):
         self.vsb.grid(row=0, column=1, sticky="ns")
 
         self.inner = ttk.Frame(self.canvas)
-        self.inner_id = self.canvas.create_window((0, 0), window=self.inner, anchor="nw")
+        self.inner_id = self.canvas.create_window((0,0), window=self.inner, anchor="nw")
 
         self._need_scroll = False
 
@@ -334,10 +311,8 @@ class VScrollFrame(ttk.Frame):
         def _bind_wheel(_=None):
             if self._need_scroll:
                 self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
-
         def _unbind_wheel(_=None):
             self.canvas.unbind_all("<MouseWheel>")
-
         for w in (self.canvas, self.inner):
             w.bind("<Enter>", _bind_wheel)
             w.bind("<Leave>", _unbind_wheel)
@@ -345,8 +320,7 @@ class VScrollFrame(ttk.Frame):
     def _on_mousewheel(self, event):
         if not self._need_scroll:
             return
-        self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-
+        self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
 
 class HighlightList(tb.Frame):
     def __init__(self, master, on_select, keybind_parent=None):
@@ -369,19 +343,16 @@ class HighlightList(tb.Frame):
         self.inner_id = self.canvas.create_window((0, 0), window=self.inner, anchor="nw")
 
         self._need_scroll = False
-
         def _update(event=None):
             self.canvas.itemconfig(self.inner_id, width=self.canvas.winfo_width())
             self.canvas.configure(scrollregion=self.canvas.bbox("all"))
             need = (self.inner.winfo_reqheight() > self.canvas.winfo_height())
             if need != self._need_scroll:
                 self._need_scroll = need
-                if need:
-                    self.vsb.grid()
+                if need: self.vsb.grid()
                 else:
                     self.vsb.grid_remove()
                     self.canvas.yview_moveto(0)
-
         self.inner.bind("<Configure>", _update)
         self.canvas.bind("<Configure>", _update)
 
@@ -389,10 +360,8 @@ class HighlightList(tb.Frame):
         def _bind_wheel(_=None):
             if self._need_scroll:
                 self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
-
         def _unbind_wheel(_=None):
             self.canvas.unbind_all("<MouseWheel>")
-
         for w in (self.canvas, self.inner):
             w.bind("<Enter>", _bind_wheel)
             w.bind("<Leave>", _unbind_wheel)
@@ -440,8 +409,8 @@ class HighlightList(tb.Frame):
             row.pack(fill=X, padx=4, pady=2)
 
             pre = text[:start] if start is not None else text
-            match = text[start:start + ln] if start is not None else ""
-            post = text[start + ln:] if start is not None else ""
+            match = text[start:start+ln] if start is not None else ""
+            post = text[start+ln:] if start is not None else ""
 
             tb.Label(row, text=pre, anchor="w").pack(side=LEFT)
             if match:
@@ -451,7 +420,6 @@ class HighlightList(tb.Frame):
 
             def _click_factory(n=name):
                 return lambda e: self.on_select(n)
-
             row.bind("<Button-1>", _click_factory())
             for child in row.winfo_children():
                 child.bind("<Button-1>", _click_factory())
@@ -485,7 +453,6 @@ class HighlightList(tb.Frame):
         name, _ = self.items[self.current_index]
         self.on_select(name)
 
-
 # === Приложение ===
 class WorkOrderApp:
     def __init__(self, root: tb.Window):
@@ -496,12 +463,9 @@ class WorkOrderApp:
         # Верхняя панель
         topbar = tb.Frame(self.root, padding=8)
         tb.Label(topbar, text="Наряд‑Заказ", font=("-size", 16, "-weight", "bold")).pack(side=LEFT)
-        tb.Button(topbar, text="Создать наряд", bootstyle="primary", command=self.open_create_form).pack(side=RIGHT,
-                                                                                                         padx=6)
-        tb.Button(topbar, text="Админ‑панель", bootstyle="secondary", command=self.open_admin_panel).pack(side=RIGHT,
-                                                                                                          padx=6)
-        tb.Button(topbar, text="Обновить списки", bootstyle="warning", command=self.refresh_lists).pack(side=RIGHT,
-                                                                                                        padx=6)
+        tb.Button(topbar, text="Создать наряд", bootstyle="primary", command=self.open_create_form).pack(side=RIGHT, padx=6)
+        tb.Button(topbar, text="Админ‑панель", bootstyle="secondary", command=self.open_admin_panel).pack(side=RIGHT, padx=6)
+        tb.Button(topbar, text="Обновить списки", bootstyle="warning", command=self.refresh_lists).pack(side=RIGHT, padx=6)
         topbar.pack(fill=X)
 
         self.root.bind("<Control-n>", lambda e: self.open_create_form())
@@ -567,10 +531,8 @@ class WorkOrderApp:
         frm_customer.grid_columnconfigure(1, weight=1)
 
         self.customer_type = tk.StringVar(value="Частное лицо")
-        tb.Radiobutton(frm_customer, text="Частное лицо", variable=self.customer_type, value="Частное лицо",
-                       command=self._on_customer_type_changed).grid(row=0, column=0, sticky=NW, padx=4, pady=4)
-        tb.Radiobutton(frm_customer, text="Компания", variable=self.customer_type, value="Компания",
-                       command=self._on_customer_type_changed).grid(row=0, column=1, sticky=NW, padx=4, pady=4)
+        tb.Radiobutton(frm_customer, text="Частное лицо", variable=self.customer_type, value="Частное лицо", command=self._on_customer_type_changed).grid(row=0, column=0, sticky=NW, padx=4, pady=4)
+        tb.Radiobutton(frm_customer, text="Компания", variable=self.customer_type, value="Компания", command=self._on_customer_type_changed).grid(row=0, column=1, sticky=NW, padx=4, pady=4)
 
         tb.Label(frm_customer, text="Поиск по компаниям (Ctrl+F):").grid(row=1, column=0, sticky=NW, padx=4, pady=4)
         self.company_query = tk.StringVar(value="")
@@ -580,7 +542,6 @@ class WorkOrderApp:
         def focus_search(event=None):
             self.entry_company_query.focus_set()
             self.entry_company_query.selection_range(0, tk.END)
-
         win.bind("<Control-f>", focus_search)
 
         def on_pick_company(name):
@@ -588,78 +549,16 @@ class WorkOrderApp:
             self._update_company_meta()
 
         self.search_results = HighlightList(frm_customer, on_select=on_pick_company, keybind_parent=win)
-        self.search_results.grid(row=2, column=0, columnspan=2, sticky="we", padx=2, pady=(0, 6))
+        self.search_results.grid(row=2, column=0, columnspan=2, sticky="we", padx=2, pady=(0,6))
 
         tb.Label(frm_customer, text="Компания:").grid(row=3, column=0, sticky=NW, padx=4, pady=4)
         self.company_selected = tk.StringVar(value=(ALL_COMPANY_NAMES[0] if ALL_COMPANY_NAMES else ""))
-        self.cmb_company = tb.Combobox(frm_customer, textvariable=self.company_selected, values=ALL_COMPANY_NAMES,
-                                       state="readonly")
+        self.cmb_company = tb.Combobox(frm_customer, textvariable=self.company_selected, values=ALL_COMPANY_NAMES, state="readonly")
         self.cmb_company.grid(row=3, column=1, sticky="we", padx=4, pady=4)
 
         tb.Label(frm_customer, text="ИНН:").grid(row=4, column=0, sticky=NW, padx=4, pady=4)
-        # --- Поиск по номеру (авто/прицеп) ---
-        tb.Label(frm_customer, text="Поиск по номеру (авто/прицеп):").grid(row=5, column=0, sticky=NW, padx=4, pady=4)
-        self.plate_query = tk.StringVar(value="")
-        self.entry_plate_query = tb.Entry(frm_customer, textvariable=self.plate_query)
-        self.entry_plate_query.grid(row=5, column=1, sticky="we", padx=4, pady=4)
-
-        def on_pick_plate(display_text):
-            meta = self._plate_search_map.get(display_text)
-            if not meta:
-                return
-            self.customer_type.set("Компания")
-            self._on_customer_type_changed()
-            self.company_selected.set(meta["company"])
-            self._update_company_meta()
-            if meta["is_trailer"]:
-                if hasattr(self, "trailer_list"):
-                    try:
-                        self.trailer_list.set(meta["plate"])
-                    except Exception:
-                        pass
-            else:
-                if hasattr(self, "plate_list"):
-                    try:
-                        self.plate_list.set(meta["plate"])
-                    except Exception:
-                        pass
-            try:
-                self.plate_search_results.set_items([], "")
-            except Exception:
-                pass
-            self.plate_query.set(meta["plate"])
-
-        if not hasattr(self, "_plate_search_map"):
-            self._plate_search_map = {}
-
-        self.plate_search_results = HighlightList(frm_customer, on_select=on_pick_plate, keybind_parent=win)
-        self.plate_search_results.grid(row=6, column=0, columnspan=2, sticky="we", padx=2, pady=(0, 6))
-
-        def apply_plate_filter(*_):
-            q = (self.plate_query.get() or "").strip().lower()
-            items = []
-            self._plate_search_map.clear()
-            for comp_name in ALL_COMPANY_NAMES:
-                meta = COMPANIES.get(comp_name, {})
-                for p in meta.get("plates", []) or []:
-                    if (not q) or (q in p.lower() or q in comp_name.lower()):
-                        display = f"{p} — {comp_name}"
-                        items.append(display)
-                        self._plate_search_map[display] = {
-                            "company": comp_name,
-                            "plate": p,
-                            "is_trailer": is_trailer_plate(p),
-                        }
-            items = items[:50]
-            self.plate_search_results.set_items(items, q)
-
-        self._plate_query_trace = self.plate_query.trace_add("write", apply_plate_filter)
-        apply_plate_filter()
-
         self.company_inn_var = tk.StringVar(value="")
-        tb.Label(frm_customer, textvariable=self.company_inn_var, bootstyle="secondary").grid(row=4, column=1,
-                                                                                              sticky="w", padx=4,
-                                                                                              pady=4)
+        tb.Label(frm_customer, textvariable=self.company_inn_var, bootstyle="secondary").grid(row=4, column=1, sticky="w", padx=4, pady=4)
 
         def apply_filter(*_):
             q = self.company_query.get().strip().lower()
@@ -686,14 +585,10 @@ class WorkOrderApp:
         self.plate_entry = tb.Entry(frm_plate, textvariable=self.plate_var)
         self.plate_list = tb.Combobox(frm_plate, values=[], state="readonly")
 
-        tb.Label(frm_plate, text="Номер (для частного лица — вручную):").grid(row=0, column=0, sticky=NW, padx=4,
-                                                                              pady=4)
+        tb.Label(frm_plate, text="Номер (для частного лица — вручную):").grid(row=0, column=0, sticky=NW, padx=4, pady=4)
         self.plate_entry.grid(row=1, column=0, sticky="we", padx=4, pady=4)
         self.plate_list.grid(row=1, column=1, sticky="we", padx=4, pady=4)
 
-        tb.Label(frm_plate, text="Номер прицепа (опционально):").grid(row=2, column=1, sticky=NW, padx=4, pady=(4, 4))
-        self.trailer_list = tb.Combobox(frm_plate, values=[], state="readonly")
-        self.trailer_list.grid(row=3, column=1, sticky="we", padx=4, pady=(0, 4))
         # Водитель
         frm_driver = tb.Labelframe(left, text="Ф.И.О. водителя", padding=8)
         frm_driver.grid(row=2, column=0, sticky="we", **pad)
@@ -722,7 +617,6 @@ class WorkOrderApp:
             else:
                 self.defect_entry.configure(state=DISABLED)
                 self.defect_custom.set("")
-
         cmb_def.bind("<<ComboboxSelected>>", lambda e: on_defect_changed())
         on_defect_changed()
 
@@ -754,7 +648,7 @@ class WorkOrderApp:
 
         # Прокручиваемый список услуг
         svc = VScrollFrame(frm_services)
-        svc.grid(row=1, column=0, sticky="nsew", pady=(4, 0))
+        svc.grid(row=1, column=0, sticky="nsew", pady=(4,0))
         svc.canvas.configure(height=640)
         svc_inner = svc.inner
 
@@ -763,21 +657,15 @@ class WorkOrderApp:
         for i, name in enumerate(SERVICES, start=1):
             var = tk.IntVar(value=0)
             qty = tk.IntVar(value=0)
-
             def _on_toggle_factory(v=var, q=qty):
                 def handler():
                     if v.get() and q.get() == 0:
                         q.set(1)
                     if not v.get():
                         q.set(0)
-
                 return handler
-
-            tb.Checkbutton(svc_inner, text=name, variable=var, command=_on_toggle_factory()).grid(row=i, column=0,
-                                                                                                  sticky=NW, padx=4,
-                                                                                                  pady=2)
-            tb.Spinbox(svc_inner, from_=0, to=999, textvariable=qty, width=6).grid(row=i, column=1, sticky=NW, padx=4,
-                                                                                   pady=2)
+            tb.Checkbutton(svc_inner, text=name, variable=var, command=_on_toggle_factory()).grid(row=i, column=0, sticky=NW, padx=4, pady=2)
+            tb.Spinbox(svc_inner, from_=0, to=999, textvariable=qty, width=6).grid(row=i, column=1, sticky=NW, padx=4, pady=2)
             tb.Label(svc_inner, text=str(FIXED_PRICE)).grid(row=i, column=2, sticky=NW, padx=4, pady=2)
             svc_inner.grid_columnconfigure(0, weight=1)
             self.services_vars[name] = var
@@ -786,10 +674,8 @@ class WorkOrderApp:
         # Кнопки действия (внизу правой панели)
         actions = tb.Frame(right)
         actions.grid(row=1, column=0, sticky="we", **pad)
-        tb.Button(actions, text="Сформировать Excel (Ctrl+S)", bootstyle="success", command=self._build_xlsx_only).pack(
-            side=LEFT, padx=6)
-        tb.Button(actions, text="Сформировать PDF (Ctrl+P)", bootstyle="info", command=self._build_and_save).pack(
-            side=LEFT, padx=6)
+        tb.Button(actions, text="Сформировать Excel (Ctrl+S)", bootstyle="success", command=self._build_xlsx_only).pack(side=LEFT, padx=6)
+        tb.Button(actions, text="Сформировать PDF (Ctrl+P)", bootstyle="info", command=self._build_and_save).pack(side=LEFT, padx=6)
 
         # Инициализация
         self._on_customer_type_changed()
@@ -861,12 +747,10 @@ class WorkOrderApp:
             inn = inn_var.get().strip()
             plates = join_plates(parse_plates(plates_var.get()))
             if not name:
-                messagebox.showerror("Ошибка", "Введите название компании.", parent=win);
-                return
+                messagebox.showerror("Ошибка", "Введите название компании.", parent=win); return
             df = read_companies_df()
             if (df[COL_NAME].str.lower() == name.lower()).any():
-                messagebox.showerror("Ошибка", "Компания с таким названием уже существует.", parent=win);
-                return
+                messagebox.showerror("Ошибка", "Компания с таким названием уже существует.", parent=win); return
             # добавляем В КОНЕЦ
             df.loc[len(df)] = {COL_NAME: name, COL_INN: inn, COL_PLATES: plates, COL_PAY: "да"}
             write_companies_df(df)
@@ -874,17 +758,10 @@ class WorkOrderApp:
             # обновим GUI, если окно формы открыто
             self._apply_companies_to_form(self._create_form_window)
             # обновим списки во всех вкладках админки
-            _apply_filter1();
-            _apply_filter2();
-            _apply_filter3();
-            _apply_filter4();
-            _refresh_plates_list();
-            _sync_pay_toggle()
+            _apply_filter1(); _apply_filter2(); _apply_filter3(); _apply_filter4(); _refresh_plates_list(); _sync_pay_toggle()
             messagebox.showinfo("Готово", "Компания добавлена (в конец) и включена в списки (Оплата=да).", parent=win)
 
-        tb.Button(tab_add_company, text="Добавить", bootstyle="success", command=do_add_company).grid(row=3, column=1,
-                                                                                                      sticky="e",
-                                                                                                      pady=8)
+        tb.Button(tab_add_company, text="Добавить", bootstyle="success", command=do_add_company).grid(row=3, column=1, sticky="e", pady=8)
 
         # ====== вкладка Добавить гос.номер ======
         tab_add_plate = tb.Frame(nb, padding=10)
@@ -892,8 +769,7 @@ class WorkOrderApp:
 
         q1 = tk.StringVar()
         tb.Label(tab_add_plate, text="Поиск компании:").grid(row=0, column=0, sticky=NW, pady=4)
-        e_q1 = tb.Entry(tab_add_plate, textvariable=q1);
-        e_q1.grid(row=0, column=1, sticky="we", pady=4)
+        e_q1 = tb.Entry(tab_add_plate, textvariable=q1); e_q1.grid(row=0, column=1, sticky="we", pady=4)
         tab_add_plate.grid_columnconfigure(1, weight=1)
         combo1 = tb.Combobox(tab_add_plate, values=list(COMPANIES.keys()), state="readonly")
         combo1.grid(row=1, column=0, columnspan=2, sticky="we", pady=4)
@@ -905,7 +781,6 @@ class WorkOrderApp:
             combo1["values"] = vals
             if vals:
                 combo1.set(vals[0])
-
         q1.trace_add("write", _apply_filter1)
         _apply_filter1()
 
@@ -916,13 +791,11 @@ class WorkOrderApp:
         def do_add_plates():
             name = combo1.get().strip()
             if not name:
-                messagebox.showerror("Ошибка", "Выберите компанию.", parent=win);
-                return
+                messagebox.showerror("Ошибка", "Выберите компанию.", parent=win); return
             df = read_companies_df()
             mask = df[COL_NAME].str.lower() == name.lower()
             if not mask.any():
-                messagebox.showerror("Ошибка", "Компания не найдена в таблице.", parent=win);
-                return
+                messagebox.showerror("Ошибка", "Компания не найдена в таблице.", parent=win); return
             plates_old = parse_plates(df.loc[mask, COL_PLATES].iloc[0])
             plates_new = parse_plates(newplates_var.get())
             plates_joined = join_plates(plates_old + plates_new)
@@ -930,14 +803,10 @@ class WorkOrderApp:
             write_companies_df(df)
             reload_companies_globals()
             self._apply_companies_to_form(self._create_form_window)
-            _apply_filter1();
-            _refresh_plates_list()
+            _apply_filter1(); _refresh_plates_list()
             messagebox.showinfo("Готово", "Номера добавлены.", parent=win)
 
-        tb.Button(tab_add_plate, text="Добавить номера", bootstyle="success", command=do_add_plates).grid(row=3,
-                                                                                                          column=1,
-                                                                                                          sticky="e",
-                                                                                                          pady=8)
+        tb.Button(tab_add_plate, text="Добавить номера", bootstyle="success", command=do_add_plates).grid(row=3, column=1, sticky="e", pady=8)
 
         # ====== вкладка Оплата on/off ======
         tab_pay = tb.Frame(nb, padding=10)
@@ -945,25 +814,22 @@ class WorkOrderApp:
 
         q2 = tk.StringVar()
         tb.Label(tab_pay, text="Поиск компании:").grid(row=0, column=0, sticky=NW, pady=4)
-        e_q2 = tb.Entry(tab_pay, textvariable=q2);
-        e_q2.grid(row=0, column=1, sticky="we", pady=4)
+        e_q2 = tb.Entry(tab_pay, textvariable=q2); e_q2.grid(row=0, column=1, sticky="we", pady=4)
         tab_pay.grid_columnconfigure(1, weight=1)
         combo2 = tb.Combobox(tab_pay, values=list(COMPANIES.keys()), state="readonly")
         combo2.grid(row=1, column=0, columnspan=2, sticky="we", pady=4)
 
         pay_var = tk.BooleanVar(value=False)
-        tb.Checkbutton(tab_pay, text="Оплата включена (да)", variable=pay_var, bootstyle="success-square-toggle").grid(
-            row=2, column=0, sticky=NW, pady=4)
+        tb.Checkbutton(tab_pay, text="Оплата включена (да)", variable=pay_var, bootstyle="success-square-toggle").grid(row=2, column=0, sticky=NW, pady=4)
 
         def _sync_pay_toggle(*_):
             name = combo2.get().strip()
             if not name:
-                pay_var.set(False);
-                return
+                pay_var.set(False); return
             df_state = read_companies_df()
             mask = df_state[COL_NAME].str.lower() == name.lower()
             current = str(df_state.loc[mask, COL_PAY].iloc[0]).strip().lower() if mask.any() else ''
-            pay_var.set(current in ("да", "yes", "true", "1"))
+            pay_var.set(current in ("да","yes","true","1"))
 
         def _apply_filter2(*_):
             all_names = list(COMPANIES.keys())
@@ -973,9 +839,7 @@ class WorkOrderApp:
             if vals:
                 combo2.set(vals[0])
                 _sync_pay_toggle()
-
-        q2.trace_add("write", _apply_filter2);
-        _apply_filter2()
+        q2.trace_add("write", _apply_filter2); _apply_filter2()
         combo2.bind("<<ComboboxSelected>>", _sync_pay_toggle)
 
         def do_set_pay():
@@ -983,18 +847,15 @@ class WorkOrderApp:
             df = read_companies_df()
             mask = df[COL_NAME].str.lower() == name.lower()
             if not mask.any():
-                messagebox.showerror("Ошибка", "Компания не найдена.", parent=win);
-                return
+                messagebox.showerror("Ошибка", "Компания не найдена.", parent=win); return
             df.loc[mask, COL_PAY] = "да" if pay_var.get() else "нет"
             write_companies_df(df)
             reload_companies_globals()
             self._apply_companies_to_form(self._create_form_window)
-            _apply_filter2();
-            _sync_pay_toggle()
+            _apply_filter2(); _sync_pay_toggle()
             messagebox.showinfo("Готово", "Статус оплаты обновлён.", parent=win)
 
-        tb.Button(tab_pay, text="Сохранить", bootstyle="success", command=do_set_pay).grid(row=3, column=1, sticky="e",
-                                                                                           pady=8)
+        tb.Button(tab_pay, text="Сохранить", bootstyle="success", command=do_set_pay).grid(row=3, column=1, sticky="e", pady=8)
 
         # ====== вкладка Удалить компанию ======
         tab_del_company = tb.Frame(nb, padding=10)
@@ -1002,8 +863,7 @@ class WorkOrderApp:
 
         q3 = tk.StringVar()
         tb.Label(tab_del_company, text="Поиск компании:").grid(row=0, column=0, sticky=NW, pady=4)
-        e_q3 = tb.Entry(tab_del_company, textvariable=q3);
-        e_q3.grid(row=0, column=1, sticky="we", pady=4)
+        e_q3 = tb.Entry(tab_del_company, textvariable=q3); e_q3.grid(row=0, column=1, sticky="we", pady=4)
         tab_del_company.grid_columnconfigure(1, weight=1)
         combo3 = tb.Combobox(tab_del_company, values=list(COMPANIES.keys()), state="readonly")
         combo3.grid(row=1, column=0, columnspan=2, sticky="we", pady=4)
@@ -1015,15 +875,12 @@ class WorkOrderApp:
             combo3["values"] = vals
             if vals:
                 combo3.set(vals[0])
-
-        q3.trace_add("write", _apply_filter3);
-        _apply_filter3()
+        q3.trace_add("write", _apply_filter3); _apply_filter3()
 
         def do_del_company():
             name = combo3.get().strip()
             if not name:
-                messagebox.showerror("Ошибка", "Выберите компанию.", parent=win);
-                return
+                messagebox.showerror("Ошибка", "Выберите компанию.", parent=win); return
             if not messagebox.askyesno("Подтвердите", f"Удалить компанию «{name}» и все её номера?", parent=win):
                 return
             df = read_companies_df()
@@ -1031,16 +888,10 @@ class WorkOrderApp:
             write_companies_df(df)
             reload_companies_globals()
             self._apply_companies_to_form(self._create_form_window)
-            _apply_filter1();
-            _apply_filter2();
-            _apply_filter3();
-            _apply_filter4();
-            _refresh_plates_list();
-            _sync_pay_toggle()
+            _apply_filter1(); _apply_filter2(); _apply_filter3(); _apply_filter4(); _refresh_plates_list(); _sync_pay_toggle()
             messagebox.showinfo("Готово", "Компания удалена.", parent=win)
 
-        tb.Button(tab_del_company, text="Удалить", bootstyle="danger", command=do_del_company).grid(row=2, column=1,
-                                                                                                    sticky="e", pady=8)
+        tb.Button(tab_del_company, text="Удалить", bootstyle="danger", command=do_del_company).grid(row=2, column=1, sticky="e", pady=8)
 
         # ====== вкладка Удалить гос.номер ======
         tab_del_plate = tb.Frame(nb, padding=10)
@@ -1048,8 +899,7 @@ class WorkOrderApp:
 
         q4 = tk.StringVar()
         tb.Label(tab_del_plate, text="Поиск компании:").grid(row=0, column=0, sticky=NW, pady=4)
-        e_q4 = tb.Entry(tab_del_plate, textvariable=q4);
-        e_q4.grid(row=0, column=1, sticky="we", pady=4)
+        e_q4 = tb.Entry(tab_del_plate, textvariable=q4); e_q4.grid(row=0, column=1, sticky="we", pady=4)
         tab_del_plate.grid_columnconfigure(1, weight=1)
         combo4 = tb.Combobox(tab_del_plate, values=list(COMPANIES.keys()), state="readonly")
         combo4.grid(row=1, column=0, columnspan=2, sticky="we", pady=4)
@@ -1074,36 +924,30 @@ class WorkOrderApp:
                 combo4.set(vals[0])
                 _refresh_plates_list()
 
-        q4.trace_add("write", _apply_filter4);
-        _apply_filter4()
+        q4.trace_add("write", _apply_filter4); _apply_filter4()
         combo4.bind("<<ComboboxSelected>>", lambda e: _refresh_plates_list())
 
         def do_del_plates():
             name = combo4.get().strip()
             if not name:
-                messagebox.showerror("Ошибка", "Выберите компанию.", parent=win);
-                return
+                messagebox.showerror("Ошибка", "Выберите компанию.", parent=win); return
             sel = [listbox.get(i) for i in listbox.curselection()]
             if not sel:
-                messagebox.showerror("Ошибка", "Выберите номера для удаления.", parent=win);
-                return
+                messagebox.showerror("Ошибка", "Выберите номера для удаления.", parent=win); return
             df = read_companies_df()
             mask = df[COL_NAME].str.lower() == name.lower()
             if not mask.any():
-                messagebox.showerror("Ошибка", "Компания не найдена в таблице.", parent=win);
-                return
+                messagebox.showerror("Ошибка", "Компания не найдена в таблице.", parent=win); return
             old = parse_plates(df.loc[mask, COL_PLATES].iloc[0])
             new = [p for p in old if p not in sel]
             df.loc[mask, COL_PLATES] = join_plates(new)
             write_companies_df(df)
             reload_companies_globals()
             self._apply_companies_to_form(self._create_form_window)
-            _apply_filter4();
-            _refresh_plates_list()
+            _apply_filter4(); _refresh_plates_list()
             messagebox.showinfo("Готово", "Выбранные номера удалены.", parent=win)
 
-        tb.Button(tab_del_plate, text="Удалить отмеченные номера", bootstyle="danger", command=do_del_plates).grid(
-            row=3, column=1, sticky="e", pady=8)
+        tb.Button(tab_del_plate, text="Удалить отмеченные номера", bootstyle="danger", command=do_del_plates).grid(row=3, column=1, sticky="e", pady=8)
 
     # ======= ЛОГИКА формы =======
     def _widget_exists(self, w) -> bool:
@@ -1176,9 +1020,6 @@ class WorkOrderApp:
         if is_company:
             customer_display = self.company_selected.get()
             plate_value = self.plate_list.get().strip()
-            trailer_value = (self.trailer_list.get().strip() if hasattr(self, "trailer_list") else "")
-            if trailer_value:
-                plate_value = f"{plate_value} / {trailer_value}"
         else:
             customer_display = "Частное лицо"
             plate_value = self.plate_entry.get().strip()
@@ -1207,8 +1048,7 @@ class WorkOrderApp:
         data = self._gather_data()
         try:
             xlsx_path = fill_excel_only(data)
-            messagebox.showinfo("Готово", f"Excel сформирован:\n\n{xlsx_path}\n\nОткрываю папку с результатами.",
-                                parent=self._form_parent)
+            messagebox.showinfo("Готово", f"Excel сформирован:\n\n{xlsx_path}\n\nОткрываю папку с результатами.", parent=self._form_parent)
             try:
                 os.startfile(str(OUTPUT_DIR.resolve()))
             except Exception:
@@ -1226,9 +1066,7 @@ class WorkOrderApp:
         data = self._gather_data()
         try:
             xlsx_path, pdf_path = fill_excel_and_export_pdf(data)
-            messagebox.showinfo("Готово",
-                                f"Файлы сохранены:\n\n{xlsx_path}\n{pdf_path}\n\nОткрываю папку с результатами.",
-                                parent=self._form_parent)
+            messagebox.showinfo("Готово", f"Файлы сохранены:\n\n{xlsx_path}\n{pdf_path}\n\nОткрываю папку с результатами.", parent=self._form_parent)
             try:
                 os.startfile(str(OUTPUT_DIR.resolve()))
             except Exception:
@@ -1236,17 +1074,14 @@ class WorkOrderApp:
         except FileNotFoundError as e:
             messagebox.showerror("Шаблон не найден", str(e), parent=self._form_parent)
         except RuntimeError as e:
-            messagebox.showerror("Не удалось создать PDF", f"{e}\nПроверьте наличие Microsoft Excel (или LibreOffice).",
-                                 parent=self._form_parent)
+            messagebox.showerror("Не удалось создать PDF", f"{e}\nПроверьте наличие Microsoft Excel (или LibreOffice).", parent=self._form_parent)
         except Exception as e:
             messagebox.showerror("Ошибка", f"Неожиданная ошибка: {e}", parent=self._form_parent)
-
 
 def main():
     app = tb.Window(themename="flatly")
     WorkOrderApp(app)
     app.mainloop()
-
 
 if __name__ == "__main__":
     main()

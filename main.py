@@ -47,10 +47,11 @@ CELL_DEFECT_LINE1 = "Y8"
 CELL_DEFECT_LINE2 = "A9"
 CELL_ISSUED_TO = "N10"
 CELL_DATE = "CG4"
-CELL_TOTAL_NUM = "BR38"
-CELL_TOTAL_TEXT = "A39"
-CELL_MECHANIC = "B43"
-
+# Итоговые суммы и подписи
+CELL_TOTAL_NUM = "BR47"
+CELL_TOTAL_TEXT = "A49"
+# Верхняя левая ячейка объединённого диапазона для механика
+CELL_MECHANIC = "W52"
 
 
 SERVICES_START_ROW = 13
@@ -85,9 +86,9 @@ SERVICES = [
     "Установка камеры",
     "Ремонт камеры",
     "Герметик",
-    "Ремонт покрышки пласт. №",
+    "Ремонт покрышки",
     "Снятие запасного колеса",
-    "Вулканизация покрышки",
+    "Вулканизация камеры",
     "Вентиль грузовой",
     "Вентиль ремонтный",
     "Вентиль легковой",
@@ -101,6 +102,15 @@ SERVICES = [
     "Подкачка",
     "Жгут",
     "Разгрузка и погрузка колеса",
+    "Косметическая варка",
+    "Пластырь №",
+    "Нарезка протектора одна дорожка",
+    "Протяжка колёс",
+    "Проверка на герметичность",
+    "Мойка колёс",
+    "Подкачка колёс",
+    "Прокат домкрата",
+    "Упаковочный пакет",
     "Срочность",
 ]
 
@@ -179,6 +189,20 @@ COMPANIES, ALL_COMPANY_NAMES = load_companies()
 def reload_companies_globals():
     global COMPANIES, ALL_COMPANY_NAMES
     COMPANIES, ALL_COMPANY_NAMES = load_companies()
+
+
+def filter_companies(query: str) -> list[str]:
+    q = str(query).strip().lower()
+    if not q:
+        return list(ALL_COMPANY_NAMES)
+    result = []
+    for name in ALL_COMPANY_NAMES:
+        meta = COMPANIES.get(name, {})
+        plates = meta.get("plates", [])
+        if q in name.lower() or any(q in p.lower() for p in plates):
+            result.append(name)
+    return result
+
 
 
 def filter_companies(query: str) -> list[str]:
@@ -575,6 +599,7 @@ class WorkOrderApp:
         tb.Radiobutton(frm_customer, text="Частное лицо", variable=self.customer_type, value="Частное лицо", command=self._on_customer_type_changed).grid(row=0, column=0, sticky=NW, padx=4, pady=4)
         tb.Radiobutton(frm_customer, text="Компания", variable=self.customer_type, value="Компания", command=self._on_customer_type_changed).grid(row=0, column=1, sticky=NW, padx=4, pady=4)
         tb.Label(frm_customer, text="Поиск компании или номера (Ctrl+F):").grid(row=1, column=0, sticky=NW, padx=4, pady=4)
+        tb.Label(frm_customer, text="Поиск компании или номера (Ctrl+F):").grid(row=1, column=0, sticky=NW, padx=4, pady=4)
 
         self.company_query = tk.StringVar(value="")
         self.entry_company_query = tb.Entry(frm_customer, textvariable=self.company_query)
@@ -600,7 +625,6 @@ class WorkOrderApp:
         tb.Label(frm_customer, text="ИНН:").grid(row=4, column=0, sticky=NW, padx=4, pady=4)
         self.company_inn_var = tk.StringVar(value="")
         tb.Label(frm_customer, textvariable=self.company_inn_var, bootstyle="secondary").grid(row=4, column=1, sticky="w", padx=4, pady=4)
-
         def apply_filter(*_):
             q = self.company_query.get()
             values = filter_companies(q)
@@ -612,11 +636,11 @@ class WorkOrderApp:
             self.search_results.set_items(values[:50], q.strip().lower())
             self._update_company_meta()
 
+
         self._company_query_trace = self.company_query.trace_add("write", apply_filter)
         self.cmb_company.bind("<<ComboboxSelected>>", lambda e: self._update_company_meta())
         apply_filter()
 
-        # Госномер
         frm_plate = tb.Labelframe(left, text="Гос. номер", padding=8)
         frm_plate.grid(row=1, column=0, sticky="we", **pad)
         frm_plate.grid_columnconfigure(0, weight=1)
@@ -632,7 +656,6 @@ class WorkOrderApp:
         self.plate_list.grid(row=1, column=1, sticky="we", padx=4, pady=4)
         tb.Label(frm_plate, text="Номер прицепа (опционально):").grid(row=2, column=0, columnspan=2, sticky=NW, padx=4, pady=4)
         self.trailer_list.grid(row=3, column=0, columnspan=2, sticky="we", padx=4, pady=4)
-
 
         # Водитель
         frm_driver = tb.Labelframe(left, text="Ф.И.О. водителя", padding=8)
@@ -745,7 +768,6 @@ class WorkOrderApp:
         # форма может быть не открытой или уже закрыта
         if not hasattr(self, "cmb_company") or not self._widget_exists(self.cmb_company):
             return
-
         self.cmb_company["values"] = ALL_COMPANY_NAMES
         if ALL_COMPANY_NAMES:
             self.cmb_company.set(ALL_COMPANY_NAMES[0])
@@ -763,6 +785,7 @@ class WorkOrderApp:
             if hasattr(self, "search_results") and self._widget_exists(self.search_results):
                 self.search_results.set_items(values[:50], q.strip().lower())
         self._update_company_meta()
+
 
 
     # ======= Админ‑панель =======
@@ -1095,7 +1118,6 @@ class WorkOrderApp:
             return False, "Выберите хотя бы одну услугу и укажите количество."
         return True, ""
 
-
     def _gather_data(self) -> dict:
         is_company = (self.customer_type.get() == "Компания")
         if is_company:
@@ -1115,6 +1137,7 @@ class WorkOrderApp:
             defect_value = self.defect_choice.get()
 
         data = {
+
             "customer_display": customer_display,
             "plate": plate_value,
             "trailer": trailer_value,
@@ -1124,7 +1147,6 @@ class WorkOrderApp:
             "mechanic": self.mechanic.get().strip(),
             "services": self._collect_services(),
         }
-
         return data
 
     def _build_xlsx_only(self):

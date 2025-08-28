@@ -53,6 +53,7 @@ CELL_TOTAL_TEXT = "A49"
 # Верхняя левая ячейка объединённого диапазона для механика
 CELL_MECHANIC = "W52"
 
+
 SERVICES_START_ROW = 13
 COL_QTY = "BF"
 COL_PRICE = "BR"
@@ -202,6 +203,33 @@ def filter_companies(query: str) -> list[str]:
             result.append(name)
     return result
 
+
+
+def filter_companies(query: str) -> list[str]:
+    q = str(query).strip().lower()
+    if not q:
+        return list(ALL_COMPANY_NAMES)
+    result = []
+    for name in ALL_COMPANY_NAMES:
+        meta = COMPANIES.get(name, {})
+        plates = meta.get("plates", [])
+        if q in name.lower() or any(q in p.lower() for p in plates):
+            result.append(name)
+    return result
+
+
+def filter_companies(query: str) -> list[str]:
+    q = str(query).strip().lower()
+    if not q:
+        return list(ALL_COMPANY_NAMES)
+    result = []
+    for name in ALL_COMPANY_NAMES:
+        meta = COMPANIES.get(name, {})
+        plates = meta.get("plates", [])
+        if q in name.lower() or any(q in p.lower() for p in plates):
+            result.append(name)
+    return result
+
 # === Чек и текст суммы ===
 def ruble_suffix(n: int) -> str:
     n_abs = abs(n) % 100
@@ -261,6 +289,7 @@ def _write_to_excel(ws, data: dict) -> int:
         plate_text = f"{plate_text}, {trailer}" if plate_text else trailer
     ws[CELL_PLATE] = plate_text
     ws[CELL_DRIVER] = data["driver_name"]
+
 
     defect_value = data["defect"]
     ws[CELL_DEFECT_LINE1] = "" if defect_value == "Пропустить" else defect_value
@@ -569,8 +598,9 @@ class WorkOrderApp:
         self.customer_type = tk.StringVar(value="Частное лицо")
         tb.Radiobutton(frm_customer, text="Частное лицо", variable=self.customer_type, value="Частное лицо", command=self._on_customer_type_changed).grid(row=0, column=0, sticky=NW, padx=4, pady=4)
         tb.Radiobutton(frm_customer, text="Компания", variable=self.customer_type, value="Компания", command=self._on_customer_type_changed).grid(row=0, column=1, sticky=NW, padx=4, pady=4)
-
         tb.Label(frm_customer, text="Поиск компании или номера (Ctrl+F):").grid(row=1, column=0, sticky=NW, padx=4, pady=4)
+        tb.Label(frm_customer, text="Поиск компании или номера (Ctrl+F):").grid(row=1, column=0, sticky=NW, padx=4, pady=4)
+
         self.company_query = tk.StringVar(value="")
         self.entry_company_query = tb.Entry(frm_customer, textvariable=self.company_query)
         self.entry_company_query.grid(row=1, column=1, sticky="we", padx=4, pady=4)
@@ -595,7 +625,6 @@ class WorkOrderApp:
         tb.Label(frm_customer, text="ИНН:").grid(row=4, column=0, sticky=NW, padx=4, pady=4)
         self.company_inn_var = tk.StringVar(value="")
         tb.Label(frm_customer, textvariable=self.company_inn_var, bootstyle="secondary").grid(row=4, column=1, sticky="w", padx=4, pady=4)
-
         def apply_filter(*_):
             q = self.company_query.get()
             values = filter_companies(q)
@@ -607,11 +636,11 @@ class WorkOrderApp:
             self.search_results.set_items(values[:50], q.strip().lower())
             self._update_company_meta()
 
+
         self._company_query_trace = self.company_query.trace_add("write", apply_filter)
         self.cmb_company.bind("<<ComboboxSelected>>", lambda e: self._update_company_meta())
         apply_filter()
 
-        # Госномер
         frm_plate = tb.Labelframe(left, text="Гос. номер", padding=8)
         frm_plate.grid(row=1, column=0, sticky="we", **pad)
         frm_plate.grid_columnconfigure(0, weight=1)
@@ -756,6 +785,8 @@ class WorkOrderApp:
             if hasattr(self, "search_results") and self._widget_exists(self.search_results):
                 self.search_results.set_items(values[:50], q.strip().lower())
         self._update_company_meta()
+
+
 
     # ======= Админ‑панель =======
     def open_admin_panel(self):
@@ -1106,6 +1137,7 @@ class WorkOrderApp:
             defect_value = self.defect_choice.get()
 
         data = {
+
             "customer_display": customer_display,
             "plate": plate_value,
             "trailer": trailer_value,

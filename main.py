@@ -49,7 +49,8 @@ CELL_ISSUED_TO = "N10"
 CELL_DATE = "CG4"
 CELL_TOTAL_NUM = "BR38"
 CELL_TOTAL_TEXT = "A39"
-CELL_MECHANIC = "W43"
+# Верхняя левая ячейка объединённого диапазона для механика
+CELL_MECHANIC = "B43"
 
 SERVICES_START_ROW = 13
 COL_QTY = "BF"
@@ -156,10 +157,18 @@ def load_companies() -> tuple[dict, list[str]]:
     for _, row in df.iterrows():  # сохраняем порядок строк
         name = row[COL_NAME]
         inn = row[COL_INN]
-        plates = parse_plates(row[COL_PLATES])
+        plates_all = parse_plates(row[COL_PLATES])
+        cars = [p for p in plates_all if not p.lower().startswith("прицеп")]
+        trailers = [p for p in plates_all if p.lower().startswith("прицеп")]
         pay = str(row[COL_PAY]).strip().lower()
         if name:
-            companies[name] = {"inn": inn, "plates": plates, "pay": pay}
+            companies[name] = {
+                "inn": inn,
+                "plates": plates_all,
+                "cars": cars,
+                "trailers": trailers,
+                "pay": pay,
+            }
             if pay in ("да","yes","true","1"):
                 visible_names.append(name)
     return companies, visible_names
@@ -169,6 +178,19 @@ COMPANIES, ALL_COMPANY_NAMES = load_companies()
 def reload_companies_globals():
     global COMPANIES, ALL_COMPANY_NAMES
     COMPANIES, ALL_COMPANY_NAMES = load_companies()
+
+
+def filter_companies(query: str) -> list[str]:
+    q = str(query).strip().lower()
+    if not q:
+        return list(ALL_COMPANY_NAMES)
+    result = []
+    for name in ALL_COMPANY_NAMES:
+        meta = COMPANIES.get(name, {})
+        plates = meta.get("plates", [])
+        if q in name.lower() or any(q in p.lower() for p in plates):
+            result.append(name)
+    return result
 
 # === Чек и текст суммы ===
 def ruble_suffix(n: int) -> str:
@@ -223,7 +245,11 @@ def export_pdf_via_libreoffice(xlsx_path: Path, pdf_path: Path) -> bool:
 # === Заполнение шаблона ===
 def _write_to_excel(ws, data: dict) -> int:
     ws[CELL_CUSTOMER] = data["customer_display"]
-    ws[CELL_PLATE] = data["plate"]
+    plate_text = data.get("plate", "")
+    trailer = data.get("trailer", "")
+    if trailer and trailer != "Без прицепа":
+        plate_text = f"{plate_text}, {trailer}" if plate_text else trailer
+    ws[CELL_PLATE] = plate_text
     ws[CELL_DRIVER] = data["driver_name"]
 
     defect_value = data["defect"]
@@ -534,7 +560,7 @@ class WorkOrderApp:
         tb.Radiobutton(frm_customer, text="Частное лицо", variable=self.customer_type, value="Частное лицо", command=self._on_customer_type_changed).grid(row=0, column=0, sticky=NW, padx=4, pady=4)
         tb.Radiobutton(frm_customer, text="Компания", variable=self.customer_type, value="Компания", command=self._on_customer_type_changed).grid(row=0, column=1, sticky=NW, padx=4, pady=4)
 
-        tb.Label(frm_customer, text="Поиск по компаниям (Ctrl+F):").grid(row=1, column=0, sticky=NW, padx=4, pady=4)
+        tb.Label(frm_customer, text="Поиск компании или номера (Ctrl+F):").grid(row=1, column=0, sticky=NW, padx=4, pady=4)
         self.company_query = tk.StringVar(value="")
         self.entry_company_query = tb.Entry(frm_customer, textvariable=self.company_query)
         self.entry_company_query.grid(row=1, column=1, sticky="we", padx=4, pady=4)
@@ -561,14 +587,14 @@ class WorkOrderApp:
         tb.Label(frm_customer, textvariable=self.company_inn_var, bootstyle="secondary").grid(row=4, column=1, sticky="w", padx=4, pady=4)
 
         def apply_filter(*_):
-            q = self.company_query.get().strip().lower()
-            values = [name for name in ALL_COMPANY_NAMES if q in name.lower()] if q else list(ALL_COMPANY_NAMES)
+            q = self.company_query.get()
+            values = filter_companies(q)
             self.cmb_company["values"] = values
             if values:
                 self.cmb_company.set(values[0])
             else:
                 self.cmb_company.set("")
-            self.search_results.set_items(values[:50], q)
+            self.search_results.set_items(values[:50], q.strip().lower())
             self._update_company_meta()
 
         self._company_query_trace = self.company_query.trace_add("write", apply_filter)
@@ -584,10 +610,13 @@ class WorkOrderApp:
         self.plate_var = tk.StringVar()
         self.plate_entry = tb.Entry(frm_plate, textvariable=self.plate_var)
         self.plate_list = tb.Combobox(frm_plate, values=[], state="readonly")
+        self.trailer_list = tb.Combobox(frm_plate, values=[], state="readonly")
 
         tb.Label(frm_plate, text="Номер (для частного лица — вручную):").grid(row=0, column=0, sticky=NW, padx=4, pady=4)
         self.plate_entry.grid(row=1, column=0, sticky="we", padx=4, pady=4)
         self.plate_list.grid(row=1, column=1, sticky="we", padx=4, pady=4)
+        tb.Label(frm_plate, text="Номер прицепа (опционально):").grid(row=2, column=0, columnspan=2, sticky=NW, padx=4, pady=4)
+        self.trailer_list.grid(row=3, column=0, columnspan=2, sticky="we", padx=4, pady=4)
 
         # Водитель
         frm_driver = tb.Labelframe(left, text="Ф.И.О. водителя", padding=8)
@@ -707,10 +736,15 @@ class WorkOrderApp:
             self.cmb_company.set("")
         # перезаполнить поиск (если виджеты живы)
         if hasattr(self, "company_query"):
-            q = self.company_query.get().strip().lower()
-            values = [name for name in ALL_COMPANY_NAMES if q in name.lower()] if q else list(ALL_COMPANY_NAMES)
+            q = self.company_query.get()
+            values = filter_companies(q)
+            self.cmb_company["values"] = values
+            if values:
+                self.cmb_company.set(values[0])
+            else:
+                self.cmb_company.set("")
             if hasattr(self, "search_results") and self._widget_exists(self.search_results):
-                self.search_results.set_items(values[:50], q)
+                self.search_results.set_items(values[:50], q.strip().lower())
         self._update_company_meta()
 
     # ======= Админ‑панель =======
@@ -958,16 +992,38 @@ class WorkOrderApp:
 
     def _update_company_meta(self):
         name = getattr(self, "company_selected", tk.StringVar()).get()
-        meta = COMPANIES.get(name, {"inn": "", "plates": []})
+        meta = COMPANIES.get(name, {"inn": "", "cars": [], "trailers": [], "plates": []})
         if hasattr(self, "company_inn_var"):
             self.company_inn_var.set(meta.get("inn", ""))
+        q = ""
+        if hasattr(self, "company_query"):
+            q = self.company_query.get().strip().lower()
         if hasattr(self, "plate_list") and self._widget_exists(self.plate_list):
-            plates = meta.get("plates", [])
-            self.plate_list["values"] = plates
-            if plates:
-                self.plate_list.set(plates[0])
+            cars = meta.get("cars", [])
+            self.plate_list["values"] = cars
+            sel_plate = ""
+            for p in cars:
+                if q and q in p.lower():
+                    sel_plate = p
+                    break
+            if sel_plate:
+                self.plate_list.set(sel_plate)
+            elif cars:
+                self.plate_list.set(cars[0])
             else:
                 self.plate_list.set("")
+        if hasattr(self, "trailer_list") and self._widget_exists(self.trailer_list):
+            trailers = ["Без прицепа"] + meta.get("trailers", [])
+            self.trailer_list["values"] = trailers
+            sel_trailer = ""
+            for t in trailers:
+                if q and q in t.lower():
+                    sel_trailer = t
+                    break
+            if sel_trailer:
+                self.trailer_list.set(sel_trailer)
+            else:
+                self.trailer_list.set(trailers[0])
 
     def _on_customer_type_changed(self):
         is_company = (self.customer_type.get() == "Компания")
@@ -975,9 +1031,13 @@ class WorkOrderApp:
             if is_company:
                 self.plate_entry.configure(state=DISABLED)
                 self.plate_list.configure(state="readonly")
+                if hasattr(self, "trailer_list"):
+                    self.trailer_list.configure(state="readonly")
             else:
                 self.plate_entry.configure(state=NORMAL)
                 self.plate_list.configure(state=DISABLED)
+                if hasattr(self, "trailer_list"):
+                    self.trailer_list.configure(state=DISABLED)
 
     def _collect_services(self) -> dict[str, int]:
         selected = {}
@@ -1020,9 +1080,13 @@ class WorkOrderApp:
         if is_company:
             customer_display = self.company_selected.get()
             plate_value = self.plate_list.get().strip()
+            trailer_value = self.trailer_list.get().strip() if hasattr(self, "trailer_list") else ""
+            if trailer_value == "Без прицепа":
+                trailer_value = ""
         else:
             customer_display = "Частное лицо"
             plate_value = self.plate_entry.get().strip()
+            trailer_value = ""
 
         if self.defect_choice.get() == "Другое (ввести вручную)":
             defect_value = self.defect_custom.get().strip()
@@ -1032,6 +1096,7 @@ class WorkOrderApp:
         data = {
             "customer_display": customer_display,
             "plate": plate_value,
+            "trailer": trailer_value,
             "driver_name": self.driver_name.get().strip(),
             "defect": defect_value,
             "issued_to": self.issued_to.get().strip(),

@@ -27,11 +27,13 @@ import ttkbootstrap as tb
 BASE_DIR = Path(__file__).parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 OUTPUT_DIR = BASE_DIR / "output"
+
 DATA_DIR = BASE_DIR / "data"
 TEMPLATE_XLSX = TEMPLATES_DIR / "order_template.xlsx"
 COMPANIES_XLSX = DATA_DIR / "companies.xlsx"
 PRICE_XLSX = DATA_DIR / "price.xlsx"
 CONSUMABLES_XLSX = DATA_DIR / "consumables.xlsx"
+
 
 OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
 TEMPLATES_DIR.mkdir(exist_ok=True, parents=True)
@@ -45,6 +47,7 @@ if not COMPANIES_XLSX.exists():
 CELL_CUSTOMER = "I5"
 CELL_PLATE = "G6"
 CELL_DRIVER = "G7"
+
 CELL_DEFECT_LINE1 = "Y8"
 CELL_DEFECT_LINE2 = "A9"
 CELL_ISSUED_TO = "N10"
@@ -54,6 +57,7 @@ CELL_TOTAL_NUM = "BR47"
 CELL_TOTAL_TEXT = "A49"
 # Верхняя левая ячейка объединённого диапазона для механика
 CELL_MECHANIC = "W52"
+
 
 SERVICES_START_ROW = 13
 COL_QTY = "BF"
@@ -77,6 +81,7 @@ DEFECTS = [
     "Накачка шин",
     "Другое (ввести вручную)",
 ]
+
 
 SERVICES = [
     "Снятие/установка",
@@ -114,6 +119,7 @@ SERVICES = [
     "Упаковочный пакет",
     "Срочность",
 ]
+
 
 # === Работа с компаниями ===
 COL_NAME = "Компания"
@@ -291,6 +297,250 @@ SERVICE_PRICE_NAME = {
     "Удлинитель": "Удлинитель ",
 }
 
+def filter_companies(query: str) -> list[str]:
+    q = str(query).strip().lower()
+    if not q:
+        return list(ALL_COMPANY_NAMES)
+    result = []
+    for name in ALL_COMPANY_NAMES:
+        meta = COMPANIES.get(name, {})
+        plates = meta.get("plates", [])
+        if q in name.lower() or any(q in p.lower() for p in plates):
+            result.append(name)
+    return result
+
+# === Цены услуг и расходников ===
+def _parse_price_value(v):
+    if isinstance(v, str) and "/" in v:
+        parts = [p.strip() for p in v.split("/") if p.strip()]
+        if len(parts) == 2:
+            try:
+                return int(parts[0]), int(parts[1])
+            except Exception:
+                return 0
+    try:
+        return int(v)
+    except Exception:
+        return 0
+
+def load_price_table():
+    price = {"Легковой": {}, "Грузовой": {}}
+    if not PRICE_XLSX.exists():
+        return price
+    wb = load_workbook(PRICE_XLSX, data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+    if len(rows) < 3:
+        return price
+    # Определим столбцы цен для грузовых и легковых
+    header = rows[0]
+    truck_col = header.index("Грузовой") + 1 if "Грузовой" in header else 1
+    car_col = header.index("Легковой") + 1 if "Легковой" in header else 9
+    for r in rows[2:]:
+        name = str(r[0]).strip() if r and r[0] else ""
+        if not name:
+            continue
+        price["Грузовой"][name] = _parse_price_value(r[truck_col] if truck_col < len(r) else 0)
+        price["Легковой"][name] = _parse_price_value(r[car_col] if car_col < len(r) else 0)
+    return price
+
+def load_consumables_table():
+    data = {}
+    categories = []
+    if not CONSUMABLES_XLSX.exists():
+        return data, categories
+    wb = load_workbook(CONSUMABLES_XLSX, data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+    if len(rows) < 3:
+        return data, categories
+    header1 = rows[0]
+    header2 = rows[1]
+    for i in range(2, len(header1), 2):
+        cat = header1[i]
+        if cat:
+            categories.append(str(cat).strip())
+    for row in rows[2:]:
+        kind = row[0]
+        name = row[1]
+        if not kind or not name:
+            continue
+        kind = str(kind).strip()
+        name = str(name).strip()
+        data.setdefault(kind, {}).setdefault(name, {})
+        for idx, cat in enumerate(categories):
+            base = 2 + idx*2
+            cold = row[base]
+            hot = row[base+1] if base+1 < len(row) else None
+            if cold not in (None, ""):
+                data[kind][name][(cat, "холодная")] = _parse_price_value(cold)
+            if hot not in (None, ""):
+                data[kind][name][(cat, "горячая")] = _parse_price_value(hot)
+    return data, categories
+
+PRICE_TABLE = load_price_table()
+CONSUMABLES_TABLE, CONSUMABLE_CATEGORIES = load_consumables_table()
+
+CONSUMABLE_SERVICE_MAP = {
+    "Пластырь №": "Пластырь",
+    "Грибок №": "Грибок",
+    "Удлинитель": "Удлинитель",
+    "Грузики": "Грузики",
+    "Флипер": "Флипер",
+    "Камера": "Камера",
+}
+
+SERVICE_PRICE_NAME = {
+    "Снятие/установка": "Снятие, установка наружное/внутреннее",
+    "Вентиль легковой": "Вентиль легковой (хром/черный)",
+    "Пластырь №": "Пластырь",
+    "Грибок №": "Грибок",
+    "Удлинитель": "Удлинитель ",
+}
+
+
+
+def filter_companies(query: str) -> list[str]:
+    q = str(query).strip().lower()
+    if not q:
+        return list(ALL_COMPANY_NAMES)
+    result = []
+    for name in ALL_COMPANY_NAMES:
+        meta = COMPANIES.get(name, {})
+        plates = meta.get("plates", [])
+        if q in name.lower() or any(q in p.lower() for p in plates):
+            result.append(name)
+    return result
+
+# === Цены услуг и расходников ===
+def _parse_price_value(v):
+    if isinstance(v, str) and "/" in v:
+        parts = [p.strip() for p in v.split("/") if p.strip()]
+        if len(parts) == 2:
+            try:
+                return int(parts[0]), int(parts[1])
+            except Exception:
+                return 0
+    try:
+        return int(v)
+    except Exception:
+        return 0
+
+def load_price_table():
+    price = {"Легковой": {}, "Грузовой": {}}
+    if not PRICE_XLSX.exists():
+        return price
+    wb = load_workbook(PRICE_XLSX, data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+    if len(rows) < 3:
+        return price
+    # Определим столбцы цен для грузовых и легковых
+    header = rows[0]
+    truck_col = header.index("Грузовой") + 1 if "Грузовой" in header else 1
+    car_col = header.index("Легковой") + 1 if "Легковой" in header else 9
+    for r in rows[2:]:
+        name = str(r[0]).strip() if r and r[0] else ""
+        if not name:
+            continue
+        price["Грузовой"][name] = _parse_price_value(r[truck_col] if truck_col < len(r) else 0)
+        price["Легковой"][name] = _parse_price_value(r[car_col] if car_col < len(r) else 0)
+    return price
+
+def load_consumables_table():
+    data = {}
+    categories = []
+    if not CONSUMABLES_XLSX.exists():
+        return data, categories
+    wb = load_workbook(CONSUMABLES_XLSX, data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+    if len(rows) < 3:
+        return data, categories
+    header1 = rows[0]
+    header2 = rows[1]
+    for i in range(2, len(header1), 2):
+        cat = header1[i]
+        if cat:
+            categories.append(str(cat).strip())
+    for row in rows[2:]:
+        kind = row[0]
+        name = row[1]
+        if not kind or not name:
+            continue
+        kind = str(kind).strip()
+        name = str(name).strip()
+        data.setdefault(kind, {}).setdefault(name, {})
+        for idx, cat in enumerate(categories):
+            base = 2 + idx*2
+            cold = row[base]
+            hot = row[base+1] if base+1 < len(row) else None
+            if cold not in (None, ""):
+                data[kind][name][(cat, "холодная")] = _parse_price_value(cold)
+            if hot not in (None, ""):
+                data[kind][name][(cat, "горячая")] = _parse_price_value(hot)
+    return data, categories
+
+PRICE_TABLE = load_price_table()
+CONSUMABLES_TABLE, CONSUMABLE_CATEGORIES = load_consumables_table()
+
+CONSUMABLE_SERVICE_MAP = {
+    "Пластырь №": "Пластырь",
+    "Грибок №": "Грибок",
+    "Удлинитель": "Удлинитель",
+    "Грузики": "Грузики",
+    "Флипер": "Флипер",
+    "Камера": "Камера",
+}
+
+SERVICE_PRICE_NAME = {
+    "Снятие/установка": "Снятие, установка наружное/внутреннее",
+    "Вентиль легковой": "Вентиль легковой (хром/черный)",
+    "Пластырь №": "Пластырь",
+    "Грибок №": "Грибок",
+    "Удлинитель": "Удлинитель ",
+}
+
+
+def filter_companies(query: str) -> list[str]:
+    q = str(query).strip().lower()
+    if not q:
+        return list(ALL_COMPANY_NAMES)
+    result = []
+    for name in ALL_COMPANY_NAMES:
+        meta = COMPANIES.get(name, {})
+        plates = meta.get("plates", [])
+        if q in name.lower() or any(q in p.lower() for p in plates):
+            result.append(name)
+    return result
+
+
+
+def filter_companies(query: str) -> list[str]:
+    q = str(query).strip().lower()
+    if not q:
+        return list(ALL_COMPANY_NAMES)
+    result = []
+    for name in ALL_COMPANY_NAMES:
+        meta = COMPANIES.get(name, {})
+        plates = meta.get("plates", [])
+        if q in name.lower() or any(q in p.lower() for p in plates):
+            result.append(name)
+    return result
+
+
+def filter_companies(query: str) -> list[str]:
+    q = str(query).strip().lower()
+    if not q:
+        return list(ALL_COMPANY_NAMES)
+    result = []
+    for name in ALL_COMPANY_NAMES:
+        meta = COMPANIES.get(name, {})
+        plates = meta.get("plates", [])
+        if q in name.lower() or any(q in p.lower() for p in plates):
+            result.append(name)
+    return result
+
 # === Чек и текст суммы ===
 def ruble_suffix(n: int) -> str:
     n_abs = abs(n) % 100
@@ -342,6 +592,7 @@ def export_pdf_via_libreoffice(xlsx_path: Path, pdf_path: Path) -> bool:
         return False
 
 # === Заполнение шаблона ===
+
 def _write_to_excel(ws, data: dict) -> int:
     ws[CELL_CUSTOMER] = data["customer_display"]
     plate_text = data.get("plate", "")
@@ -350,7 +601,6 @@ def _write_to_excel(ws, data: dict) -> int:
         plate_text = f"{plate_text}, {trailer}" if plate_text else trailer
     ws[CELL_PLATE] = plate_text
     ws[CELL_DRIVER] = data["driver_name"]
-
     defect_value = data["defect"]
     ws[CELL_DEFECT_LINE1] = "" if defect_value == "Пропустить" else defect_value
     ws[CELL_DEFECT_LINE2] = ""
@@ -358,7 +608,6 @@ def _write_to_excel(ws, data: dict) -> int:
     ws[CELL_ISSUED_TO] = data["issued_to"]
     ws[CELL_DATE] = datetime.datetime.now().strftime("%d.%m.%Y")
     ws[CELL_MECHANIC] = data["mechanic"]
-
     total = 0
     for idx, service_name in enumerate(SERVICES):
         row = SERVICES_START_ROW + idx
@@ -613,6 +862,70 @@ class ConsumableDialog(tb.Toplevel):
         self.result = res
         self.destroy()
 
+class ConsumableDialog(tb.Toplevel):
+    def __init__(self, parent, kind: str, qty: int):
+        super().__init__(parent)
+        self.title(kind)
+        self.result = None
+        self.grab_set()
+        names = sorted(CONSUMABLES_TABLE.get(kind, {}).keys())
+        cats = list(CONSUMABLE_CATEGORIES)
+        temps = ["холодная", "горячая"]
+        self.vars = []
+        if not names or not cats:
+            tb.Label(self, text="Нет данных для расходников").grid(row=0, column=0, padx=10, pady=10)
+            tb.Button(self, text="OK", command=self.destroy).grid(row=1, column=0, pady=6)
+            return
+        for i in range(qty):
+            row = tb.Frame(self, padding=4)
+            row.grid(row=i, column=0, sticky="we")
+            name_var = tk.StringVar(value=names[0])
+            cat_var = tk.StringVar(value=cats[0])
+            temp_var = tk.StringVar(value=temps[0])
+            tb.Combobox(row, values=names, textvariable=name_var, state="readonly", width=20).pack(side=LEFT, padx=4)
+            tb.Combobox(row, values=cats, textvariable=cat_var, state="readonly", width=20).pack(side=LEFT, padx=4)
+            tb.Combobox(row, values=temps, textvariable=temp_var, state="readonly", width=12).pack(side=LEFT, padx=4)
+            self.vars.append((name_var, cat_var, temp_var))
+        btn = tb.Button(self, text="OK", command=self._ok)
+        btn.grid(row=qty, column=0, pady=6)
+
+    def _ok(self):
+        res = []
+        for n, c, t in self.vars:
+            res.append((n.get(), c.get(), t.get()))
+        self.result = res
+        self.destroy()
+
+class ConsumableDialog(tb.Toplevel):
+    def __init__(self, parent, kind: str, qty: int):
+        super().__init__(parent)
+        self.title(kind)
+        self.result = None
+        self.grab_set()
+        names = sorted(CONSUMABLES_TABLE.get(kind, {}).keys())
+        cats = CONSUMABLE_CATEGORIES
+        temps = ["холодная", "горячая"]
+        self.vars = []
+        for i in range(qty):
+            row = tb.Frame(self, padding=4)
+            row.grid(row=i, column=0, sticky="we")
+            name_var = tk.StringVar(value=(names[0] if names else ""))
+            cat_var = tk.StringVar(value=(cats[0] if cats else ""))
+            temp_var = tk.StringVar(value=temps[0])
+            tb.Combobox(row, values=names, textvariable=name_var, state="readonly", width=20).pack(side=LEFT, padx=4)
+            tb.Combobox(row, values=cats, textvariable=cat_var, state="readonly", width=20).pack(side=LEFT, padx=4)
+            tb.Combobox(row, values=temps, textvariable=temp_var, state="readonly", width=12).pack(side=LEFT, padx=4)
+            self.vars.append((name_var, cat_var, temp_var))
+        btn = tb.Button(self, text="OK", command=self._ok)
+        btn.grid(row=qty, column=0, pady=6)
+
+    def _ok(self):
+        res = []
+        for n, c, t in self.vars:
+            res.append((n.get(), c.get(), t.get()))
+        self.result = res
+        self.destroy()
+
 # === Приложение ===
 class WorkOrderApp:
     def __init__(self, root: tb.Window):
@@ -693,8 +1006,12 @@ class WorkOrderApp:
         self.customer_type = tk.StringVar(value="Частное лицо")
         tb.Radiobutton(frm_customer, text="Частное лицо", variable=self.customer_type, value="Частное лицо", command=self._on_customer_type_changed).grid(row=0, column=0, sticky=NW, padx=4, pady=4)
         tb.Radiobutton(frm_customer, text="Компания", variable=self.customer_type, value="Компания", command=self._on_customer_type_changed).grid(row=0, column=1, sticky=NW, padx=4, pady=4)
+        tb.Label(frm_customer, text="Поиск компании или номера (Ctrl+F):").grid(row=1, column=0, sticky=NW, padx=4, pady=4)
+        tb.Label(frm_customer, text="Поиск компании или номера (Ctrl+F):").grid(row=1, column=0, sticky=NW, padx=4, pady=4)
 
         tb.Label(frm_customer, text="Поиск компании или номера (Ctrl+F):").grid(row=1, column=0, sticky=NW, padx=4, pady=4)
+        tb.Label(frm_customer, text="Поиск компании или номера (Ctrl+F):").grid(row=1, column=0, sticky=NW, padx=4, pady=4)
+
         self.company_query = tk.StringVar(value="")
         self.entry_company_query = tb.Entry(frm_customer, textvariable=self.company_query)
         self.entry_company_query.grid(row=1, column=1, sticky="we", padx=4, pady=4)
@@ -720,6 +1037,7 @@ class WorkOrderApp:
         self.company_inn_var = tk.StringVar(value="")
         tb.Label(frm_customer, textvariable=self.company_inn_var, bootstyle="secondary").grid(row=4, column=1, sticky="w", padx=4, pady=4)
 
+
         def apply_filter(*_):
             q = self.company_query.get()
             values = filter_companies(q)
@@ -734,7 +1052,6 @@ class WorkOrderApp:
         self._company_query_trace = self.company_query.trace_add("write", apply_filter)
         self.cmb_company.bind("<<ComboboxSelected>>", lambda e: self._update_company_meta())
         apply_filter()
-
         # Госномер
         frm_plate = tb.Labelframe(left, text="Гос. номер", padding=8)
         frm_plate.grid(row=1, column=0, sticky="we", **pad)
@@ -812,8 +1129,10 @@ class WorkOrderApp:
         header.grid(row=0, column=0, sticky="we")
         header.grid_columnconfigure(0, weight=1)
         tb.Label(header, text="Услуга").grid(row=0, column=0, sticky="w", padx=4, pady=2)
+
         tb.Label(header, text="Кол-во").grid(row=0, column=1, sticky="w", padx=4, pady=2)
         tb.Label(header, text="Цена (шт)").grid(row=0, column=2, sticky="w", padx=4, pady=2)
+
 
         # Прокручиваемый список услуг
         svc = VScrollFrame(frm_services)

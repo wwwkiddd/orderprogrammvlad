@@ -30,6 +30,8 @@ OUTPUT_DIR = BASE_DIR / "output"
 DATA_DIR = BASE_DIR / "data"
 TEMPLATE_XLSX = TEMPLATES_DIR / "order_template.xlsx"
 COMPANIES_XLSX = DATA_DIR / "companies.xlsx"
+PRICE_XLSX = DATA_DIR / "price.xlsx"
+CONSUMABLES_XLSX = DATA_DIR / "consumables.xlsx"
 
 OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
 TEMPLATES_DIR.mkdir(exist_ok=True, parents=True)
@@ -47,9 +49,11 @@ CELL_DEFECT_LINE1 = "Y8"
 CELL_DEFECT_LINE2 = "A9"
 CELL_ISSUED_TO = "N10"
 CELL_DATE = "CG4"
-CELL_TOTAL_NUM = "BR38"
-CELL_TOTAL_TEXT = "A39"
-CELL_MECHANIC = "W43"
+# Итоговые суммы и подписи
+CELL_TOTAL_NUM = "BR47"
+CELL_TOTAL_TEXT = "A49"
+# Верхняя левая ячейка объединённого диапазона для механика
+CELL_MECHANIC = "W52"
 
 SERVICES_START_ROW = 13
 COL_QTY = "BF"
@@ -83,9 +87,9 @@ SERVICES = [
     "Установка камеры",
     "Ремонт камеры",
     "Герметик",
-    "Ремонт покрышки пласт. №",
+    "Ремонт покрышки",
     "Снятие запасного колеса",
-    "Вулканизация покрышки",
+    "Вулканизация камеры",
     "Вентиль грузовой",
     "Вентиль ремонтный",
     "Вентиль легковой",
@@ -99,10 +103,17 @@ SERVICES = [
     "Подкачка",
     "Жгут",
     "Разгрузка и погрузка колеса",
+    "Косметическая варка",
+    "Пластырь №",
+    "Нарезка протектора одна дорожка",
+    "Протяжка колёс",
+    "Проверка на герметичность",
+    "Мойка колёс",
+    "Подкачка колёс",
+    "Прокат домкрата",
+    "Упаковочный пакет",
     "Срочность",
 ]
-
-FIXED_PRICE = 100
 
 # === Работа с компаниями ===
 COL_NAME = "Компания"
@@ -156,10 +167,18 @@ def load_companies() -> tuple[dict, list[str]]:
     for _, row in df.iterrows():  # сохраняем порядок строк
         name = row[COL_NAME]
         inn = row[COL_INN]
-        plates = parse_plates(row[COL_PLATES])
+        plates_all = parse_plates(row[COL_PLATES])
+        cars = [p for p in plates_all if not p.lower().startswith("прицеп")]
+        trailers = [p for p in plates_all if p.lower().startswith("прицеп")]
         pay = str(row[COL_PAY]).strip().lower()
         if name:
-            companies[name] = {"inn": inn, "plates": plates, "pay": pay}
+            companies[name] = {
+                "inn": inn,
+                "plates": plates_all,
+                "cars": cars,
+                "trailers": trailers,
+                "pay": pay,
+            }
             if pay in ("да","yes","true","1"):
                 visible_names.append(name)
     return companies, visible_names
@@ -169,6 +188,108 @@ COMPANIES, ALL_COMPANY_NAMES = load_companies()
 def reload_companies_globals():
     global COMPANIES, ALL_COMPANY_NAMES
     COMPANIES, ALL_COMPANY_NAMES = load_companies()
+
+
+def filter_companies(query: str) -> list[str]:
+    q = str(query).strip().lower()
+    if not q:
+        return list(ALL_COMPANY_NAMES)
+    result = []
+    for name in ALL_COMPANY_NAMES:
+        meta = COMPANIES.get(name, {})
+        plates = meta.get("plates", [])
+        if q in name.lower() or any(q in p.lower() for p in plates):
+            result.append(name)
+    return result
+
+# === Цены услуг и расходников ===
+def _parse_price_value(v):
+    if isinstance(v, str) and "/" in v:
+        parts = [p.strip() for p in v.split("/") if p.strip()]
+        if len(parts) == 2:
+            try:
+                return int(parts[0]), int(parts[1])
+            except Exception:
+                return 0
+    try:
+        return int(v)
+    except Exception:
+        return 0
+
+def load_price_table():
+    price = {"Легковой": {}, "Грузовой": {}}
+    if not PRICE_XLSX.exists():
+        return price
+    wb = load_workbook(PRICE_XLSX, data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+    if len(rows) < 3:
+        return price
+    # Определим столбцы цен для грузовых и легковых
+    header = rows[0]
+    truck_col = header.index("Грузовой") if "Грузовой" in header else 1
+    car_col = header.index("Легковой") if "Легковой" in header else 9
+    for r in rows[2:]:
+        name = str(r[0]).strip() if r and r[0] else ""
+        if not name:
+            continue
+        price["Грузовой"][name] = _parse_price_value(r[truck_col] if truck_col < len(r) else 0)
+        price["Легковой"][name] = _parse_price_value(r[car_col] if car_col < len(r) else 0)
+    return price
+
+def load_consumables_table():
+    data = {}
+    categories = []
+    if not CONSUMABLES_XLSX.exists():
+        return data, categories
+    wb = load_workbook(CONSUMABLES_XLSX, data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+    if len(rows) < 3:
+        return data, categories
+    header1 = rows[0]
+    header2 = rows[1]
+    for i in range(2, len(header1), 2):
+        cat = header1[i]
+        if cat:
+            categories.append(str(cat).strip())
+    for row in rows[2:]:
+        kind = row[0]
+        name = row[1]
+        if not kind or not name:
+            continue
+        kind = str(kind).strip()
+        name = str(name).strip()
+        data.setdefault(kind, {}).setdefault(name, {})
+        for idx, cat in enumerate(categories):
+            base = 2 + idx*2
+            cold = row[base]
+            hot = row[base+1] if base+1 < len(row) else None
+            if cold not in (None, ""):
+                data[kind][name][(cat, "холодная")] = _parse_price_value(cold)
+            if hot not in (None, ""):
+                data[kind][name][(cat, "горячая")] = _parse_price_value(hot)
+    return data, categories
+
+PRICE_TABLE = load_price_table()
+CONSUMABLES_TABLE, CONSUMABLE_CATEGORIES = load_consumables_table()
+
+CONSUMABLE_SERVICE_MAP = {
+    "Пластырь №": "Пластырь",
+    "Грибок №": "Грибок",
+    "Удлинитель": "Удлинитель",
+    "Грузики": "Грузики",
+    "Флипер": "Флипер",
+    "Камера": "Камера",
+}
+
+SERVICE_PRICE_NAME = {
+    "Снятие/установка": "Снятие, установка наружное/внутреннее",
+    "Вентиль легковой": "Вентиль легковой (хром/черный)",
+    "Пластырь №": "Пластырь",
+    "Грибок №": "Грибок",
+    "Удлинитель": "Удлинитель ",
+}
 
 # === Чек и текст суммы ===
 def ruble_suffix(n: int) -> str:
@@ -223,7 +344,11 @@ def export_pdf_via_libreoffice(xlsx_path: Path, pdf_path: Path) -> bool:
 # === Заполнение шаблона ===
 def _write_to_excel(ws, data: dict) -> int:
     ws[CELL_CUSTOMER] = data["customer_display"]
-    ws[CELL_PLATE] = data["plate"]
+    plate_text = data.get("plate", "")
+    trailer = data.get("trailer", "")
+    if trailer and trailer != "Без прицепа":
+        plate_text = f"{plate_text}, {trailer}" if plate_text else trailer
+    ws[CELL_PLATE] = plate_text
     ws[CELL_DRIVER] = data["driver_name"]
 
     defect_value = data["defect"]
@@ -237,9 +362,10 @@ def _write_to_excel(ws, data: dict) -> int:
     total = 0
     for idx, service_name in enumerate(SERVICES):
         row = SERVICES_START_ROW + idx
-        qty = data["services"].get(service_name, 0)
-        price = FIXED_PRICE if qty > 0 else 0
-        cost = qty * price
+        detail = data["services"].get(service_name, {})
+        qty = detail.get("qty", 0)
+        price = detail.get("price", 0)
+        cost = detail.get("cost", qty * price)
         ws[f"{COL_QTY}{row}"] = qty if qty else ""
         ws[f"{COL_PRICE}{row}"] = price if qty else ""
         ws[f"{COL_COST}{row}"] = cost if qty else ""
@@ -453,6 +579,40 @@ class HighlightList(tb.Frame):
         name, _ = self.items[self.current_index]
         self.on_select(name)
 
+class ConsumableDialog(tb.Toplevel):
+    def __init__(self, parent, kind: str, qty: int):
+        super().__init__(parent)
+        self.title(kind)
+        self.result = None
+        self.grab_set()
+        names = sorted(CONSUMABLES_TABLE.get(kind, {}).keys())
+        cats = list(CONSUMABLE_CATEGORIES)
+        temps = ["холодная", "горячая"]
+        self.vars = []
+        if not names or not cats:
+            tb.Label(self, text="Нет данных для расходников").grid(row=0, column=0, padx=10, pady=10)
+            tb.Button(self, text="OK", command=self.destroy).grid(row=1, column=0, pady=6)
+            return
+        for i in range(qty):
+            row = tb.Frame(self, padding=4)
+            row.grid(row=i, column=0, sticky="we")
+            name_var = tk.StringVar(value=names[0])
+            cat_var = tk.StringVar(value=cats[0])
+            temp_var = tk.StringVar(value=temps[0])
+            tb.Combobox(row, values=names, textvariable=name_var, state="readonly", width=20).pack(side=LEFT, padx=4)
+            tb.Combobox(row, values=cats, textvariable=cat_var, state="readonly", width=20).pack(side=LEFT, padx=4)
+            tb.Combobox(row, values=temps, textvariable=temp_var, state="readonly", width=12).pack(side=LEFT, padx=4)
+            self.vars.append((name_var, cat_var, temp_var))
+        btn = tb.Button(self, text="OK", command=self._ok)
+        btn.grid(row=qty, column=0, pady=6)
+
+    def _ok(self):
+        res = []
+        for n, c, t in self.vars:
+            res.append((n.get(), c.get(), t.get()))
+        self.result = res
+        self.destroy()
+
 # === Приложение ===
 class WorkOrderApp:
     def __init__(self, root: tb.Window):
@@ -534,7 +694,7 @@ class WorkOrderApp:
         tb.Radiobutton(frm_customer, text="Частное лицо", variable=self.customer_type, value="Частное лицо", command=self._on_customer_type_changed).grid(row=0, column=0, sticky=NW, padx=4, pady=4)
         tb.Radiobutton(frm_customer, text="Компания", variable=self.customer_type, value="Компания", command=self._on_customer_type_changed).grid(row=0, column=1, sticky=NW, padx=4, pady=4)
 
-        tb.Label(frm_customer, text="Поиск по компаниям (Ctrl+F):").grid(row=1, column=0, sticky=NW, padx=4, pady=4)
+        tb.Label(frm_customer, text="Поиск компании или номера (Ctrl+F):").grid(row=1, column=0, sticky=NW, padx=4, pady=4)
         self.company_query = tk.StringVar(value="")
         self.entry_company_query = tb.Entry(frm_customer, textvariable=self.company_query)
         self.entry_company_query.grid(row=1, column=1, sticky="we", padx=4, pady=4)
@@ -561,14 +721,14 @@ class WorkOrderApp:
         tb.Label(frm_customer, textvariable=self.company_inn_var, bootstyle="secondary").grid(row=4, column=1, sticky="w", padx=4, pady=4)
 
         def apply_filter(*_):
-            q = self.company_query.get().strip().lower()
-            values = [name for name in ALL_COMPANY_NAMES if q in name.lower()] if q else list(ALL_COMPANY_NAMES)
+            q = self.company_query.get()
+            values = filter_companies(q)
             self.cmb_company["values"] = values
             if values:
                 self.cmb_company.set(values[0])
             else:
                 self.cmb_company.set("")
-            self.search_results.set_items(values[:50], q)
+            self.search_results.set_items(values[:50], q.strip().lower())
             self._update_company_meta()
 
         self._company_query_trace = self.company_query.trace_add("write", apply_filter)
@@ -584,10 +744,13 @@ class WorkOrderApp:
         self.plate_var = tk.StringVar()
         self.plate_entry = tb.Entry(frm_plate, textvariable=self.plate_var)
         self.plate_list = tb.Combobox(frm_plate, values=[], state="readonly")
+        self.trailer_list = tb.Combobox(frm_plate, values=[], state="readonly")
 
         tb.Label(frm_plate, text="Номер (для частного лица — вручную):").grid(row=0, column=0, sticky=NW, padx=4, pady=4)
         self.plate_entry.grid(row=1, column=0, sticky="we", padx=4, pady=4)
         self.plate_list.grid(row=1, column=1, sticky="we", padx=4, pady=4)
+        tb.Label(frm_plate, text="Номер прицепа (опционально):").grid(row=2, column=0, columnspan=2, sticky=NW, padx=4, pady=4)
+        self.trailer_list.grid(row=3, column=0, columnspan=2, sticky="we", padx=4, pady=4)
 
         # Водитель
         frm_driver = tb.Labelframe(left, text="Ф.И.О. водителя", padding=8)
@@ -632,9 +795,15 @@ class WorkOrderApp:
         tb.Entry(frm_people, textvariable=self.mechanic).grid(row=1, column=1, sticky="we", padx=4, pady=4)
 
         # ===== Правая колонка =====
+        frm_vehicle = tb.Labelframe(right, text="Тип автомобиля", padding=8)
+        frm_vehicle.grid(row=0, column=0, sticky="we", **pad)
+        self.vehicle_type = tk.StringVar(value="Легковой")
+        tb.Radiobutton(frm_vehicle, text="Легковой", variable=self.vehicle_type, value="Легковой", command=self._update_service_prices).pack(side=LEFT, padx=4)
+        tb.Radiobutton(frm_vehicle, text="Грузовой", variable=self.vehicle_type, value="Грузовой", command=self._update_service_prices).pack(side=LEFT, padx=4)
+
         frm_services = tb.Labelframe(right, text="Услуги", padding=8)
-        frm_services.grid(row=0, column=0, sticky="nsew", **pad)
-        right.grid_rowconfigure(0, weight=1)
+        frm_services.grid(row=1, column=0, sticky="nsew", **pad)
+        right.grid_rowconfigure(1, weight=1)
         frm_services.grid_columnconfigure(0, weight=1)
         frm_services.grid_rowconfigure(1, weight=1)
 
@@ -644,7 +813,7 @@ class WorkOrderApp:
         header.grid_columnconfigure(0, weight=1)
         tb.Label(header, text="Услуга").grid(row=0, column=0, sticky="w", padx=4, pady=2)
         tb.Label(header, text="Кол-во").grid(row=0, column=1, sticky="w", padx=4, pady=2)
-        tb.Label(header, text=f"Цена (шт) = {FIXED_PRICE}").grid(row=0, column=2, sticky="w", padx=4, pady=2)
+        tb.Label(header, text="Цена (шт)").grid(row=0, column=2, sticky="w", padx=4, pady=2)
 
         # Прокручиваемый список услуг
         svc = VScrollFrame(frm_services)
@@ -654,6 +823,7 @@ class WorkOrderApp:
 
         self.services_vars = {}
         self.services_qty = {}
+        self.service_price_labels = {}
         for i, name in enumerate(SERVICES, start=1):
             var = tk.IntVar(value=0)
             qty = tk.IntVar(value=0)
@@ -666,20 +836,23 @@ class WorkOrderApp:
                 return handler
             tb.Checkbutton(svc_inner, text=name, variable=var, command=_on_toggle_factory()).grid(row=i, column=0, sticky=NW, padx=4, pady=2)
             tb.Spinbox(svc_inner, from_=0, to=999, textvariable=qty, width=6).grid(row=i, column=1, sticky=NW, padx=4, pady=2)
-            tb.Label(svc_inner, text=str(FIXED_PRICE)).grid(row=i, column=2, sticky=NW, padx=4, pady=2)
+            lbl = tb.Label(svc_inner, text="-")
+            lbl.grid(row=i, column=2, sticky=NW, padx=4, pady=2)
             svc_inner.grid_columnconfigure(0, weight=1)
             self.services_vars[name] = var
             self.services_qty[name] = qty
+            self.service_price_labels[name] = lbl
 
         # Кнопки действия (внизу правой панели)
         actions = tb.Frame(right)
-        actions.grid(row=1, column=0, sticky="we", **pad)
+        actions.grid(row=2, column=0, sticky="we", **pad)
         tb.Button(actions, text="Сформировать Excel (Ctrl+S)", bootstyle="success", command=self._build_xlsx_only).pack(side=LEFT, padx=6)
         tb.Button(actions, text="Сформировать PDF (Ctrl+P)", bootstyle="info", command=self._build_and_save).pack(side=LEFT, padx=6)
 
         # Инициализация
         self._on_customer_type_changed()
         self._update_company_meta()
+        self._update_service_prices()
 
         # Корректное отключение trace/биндов при закрытии окна
         def _cleanup():
@@ -707,10 +880,15 @@ class WorkOrderApp:
             self.cmb_company.set("")
         # перезаполнить поиск (если виджеты живы)
         if hasattr(self, "company_query"):
-            q = self.company_query.get().strip().lower()
-            values = [name for name in ALL_COMPANY_NAMES if q in name.lower()] if q else list(ALL_COMPANY_NAMES)
+            q = self.company_query.get()
+            values = filter_companies(q)
+            self.cmb_company["values"] = values
+            if values:
+                self.cmb_company.set(values[0])
+            else:
+                self.cmb_company.set("")
             if hasattr(self, "search_results") and self._widget_exists(self.search_results):
-                self.search_results.set_items(values[:50], q)
+                self.search_results.set_items(values[:50], q.strip().lower())
         self._update_company_meta()
 
     # ======= Админ‑панель =======
@@ -958,16 +1136,40 @@ class WorkOrderApp:
 
     def _update_company_meta(self):
         name = getattr(self, "company_selected", tk.StringVar()).get()
-        meta = COMPANIES.get(name, {"inn": "", "plates": []})
+        meta = COMPANIES.get(name, {"inn": "", "cars": [], "trailers": [], "plates": []})
         if hasattr(self, "company_inn_var"):
             self.company_inn_var.set(meta.get("inn", ""))
+        q = ""
+        if hasattr(self, "company_query"):
+            q = self.company_query.get().strip().lower()
         if hasattr(self, "plate_list") and self._widget_exists(self.plate_list):
-            plates = meta.get("plates", [])
-            self.plate_list["values"] = plates
-            if plates:
-                self.plate_list.set(plates[0])
+            cars = meta.get("cars", [])
+            self.plate_list["values"] = cars
+            sel_plate = ""
+            for p in cars:
+                if q and q in p.lower():
+                    sel_plate = p
+                    break
+            if sel_plate:
+                self.plate_list.set(sel_plate)
+            elif cars:
+                self.plate_list.set(cars[0])
             else:
                 self.plate_list.set("")
+        if hasattr(self, "trailer_list") and self._widget_exists(self.trailer_list):
+            trailers = ["Без прицепа"] + meta.get("trailers", [])
+            self.trailer_list["values"] = trailers
+            sel_trailer = ""
+            for t in trailers:
+                if q and q in t.lower():
+                    sel_trailer = t
+                    break
+            if sel_trailer:
+                self.trailer_list.set(sel_trailer)
+            elif trailers:
+                self.trailer_list.set(trailers[0])
+            else:
+                self.trailer_list.set("")
 
     def _on_customer_type_changed(self):
         is_company = (self.customer_type.get() == "Компания")
@@ -975,17 +1177,109 @@ class WorkOrderApp:
             if is_company:
                 self.plate_entry.configure(state=DISABLED)
                 self.plate_list.configure(state="readonly")
+                if hasattr(self, "trailer_list"):
+                    self.trailer_list.configure(state="readonly")
             else:
                 self.plate_entry.configure(state=NORMAL)
                 self.plate_list.configure(state=DISABLED)
+                if hasattr(self, "trailer_list"):
+                    self.trailer_list.configure(state=DISABLED)
 
-    def _collect_services(self) -> dict[str, int]:
+    def _update_service_prices(self):
+        vt = getattr(self, "vehicle_type", tk.StringVar(value="Легковой")).get()
+        global PRICE_TABLE
+        if not PRICE_TABLE.get(vt):
+            PRICE_TABLE = load_price_table()
+        for name, lbl in getattr(self, "service_price_labels", {}).items():
+            base_name = SERVICE_PRICE_NAME.get(name, name)
+            price = PRICE_TABLE.get(vt, {}).get(base_name, "-")
+            if isinstance(price, tuple):
+                lbl.configure(text=f"{price[0]}/{price[1]}")
+            elif price:
+                lbl.configure(text=str(price))
+            else:
+                lbl.configure(text="-")
+
+    def _ask_split_service(self, title: str, labels: list[str], total: int) -> list[int]:
+        win = tb.Toplevel(self._form_parent)
+        win.title(title)
+        vars = []
+        for i, lab in enumerate(labels):
+            row = tb.Frame(win, padding=4)
+            row.grid(row=i, column=0)
+            tb.Label(row, text=lab).pack(side=LEFT, padx=4)
+            val = tk.IntVar(value=(total if i == 0 else 0))
+            tb.Spinbox(row, from_=0, to=999, textvariable=val, width=6).pack(side=LEFT, padx=4)
+            vars.append(val)
+        res = []
+        def _ok():
+            for v in vars:
+                res.append(int(v.get()))
+            win.destroy()
+        tb.Button(win, text="OK", command=_ok).grid(row=len(labels), column=0, pady=6)
+        self._form_parent.wait_window(win)
+        return res
+
+    def _ask_consumables(self, kind: str, qty: int):
+        global CONSUMABLES_TABLE, CONSUMABLE_CATEGORIES
+        # перечитываем файл, чтобы гарантировать актуальные данные
+        CONSUMABLES_TABLE, CONSUMABLE_CATEGORIES = load_consumables_table()
+        dlg = ConsumableDialog(self._form_parent, kind, qty)
+        self._form_parent.wait_window(dlg)
+        return dlg.result or []
+
+    def _collect_services(self) -> dict[str, dict]:
+        vt = self.vehicle_type.get()
+        global PRICE_TABLE
+        if not PRICE_TABLE.get(vt):
+            PRICE_TABLE = load_price_table()
         selected = {}
         for name in SERVICES:
             var = self.services_vars[name]
             qty = max(0, int(self.services_qty[name].get()))
-            if var.get() and qty > 0:
-                selected[name] = qty
+            if not (var.get() and qty > 0):
+                continue
+            base_name = SERVICE_PRICE_NAME.get(name, name)
+            if name == "Снятие/установка":
+                outer, inner = self._ask_split_service(name, ["наружное", "внутреннее"], qty)
+                price = PRICE_TABLE.get(vt, {}).get(base_name, (0,0))
+                if isinstance(price, int):
+                    price = (price, price)
+                cost = outer*price[0] + inner*price[1]
+                total_qty = outer + inner
+                if total_qty > 0:
+                    avg = cost // total_qty
+                    selected[name] = {"qty": total_qty, "price": avg, "cost": cost}
+                    self.services_qty[name].set(total_qty)
+                else:
+                    self.services_qty[name].set(0)
+            elif name == "Вентиль легковой":
+                chrome, black = self._ask_split_service(name, ["хром", "черный"], qty)
+                price = PRICE_TABLE.get(vt, {}).get(base_name, (0,0))
+                cost = chrome*price[0] + black*price[1]
+                total_qty = chrome + black
+                if total_qty > 0:
+                    avg = cost // total_qty
+                    selected[name] = {"qty": total_qty, "price": avg, "cost": cost}
+                    self.services_qty[name].set(total_qty)
+                else:
+                    self.services_qty[name].set(0)
+            elif name in CONSUMABLE_SERVICE_MAP:
+                kind = CONSUMABLE_SERVICE_MAP[name]
+                items = self._ask_consumables(kind, qty)
+                cost = 0
+                for n, c, t in items:
+                    price = CONSUMABLES_TABLE.get(kind, {}).get(n, {}).get((c, t), 0)
+                    cost += price
+                total_qty = len(items)
+                if total_qty > 0:
+                    avg = cost // total_qty
+                    selected[name] = {"qty": total_qty, "price": avg, "cost": cost}
+                    self.services_qty[name].set(total_qty)
+            else:
+                price = PRICE_TABLE.get(vt, {}).get(base_name, 0)
+                cost = price * qty
+                selected[name] = {"qty": qty, "price": price, "cost": cost}
         return selected
 
     def _validate(self) -> tuple[bool, str]:
@@ -1011,7 +1305,7 @@ class WorkOrderApp:
             return False, "Введите фамилию исполнителя ('Наряд выдан')."
         if not self.mechanic.get().strip():
             return False, "Введите фамилию механика."
-        if len(self._collect_services()) == 0:
+        if not any(self.services_vars[name].get() and int(self.services_qty[name].get()) > 0 for name in SERVICES):
             return False, "Выберите хотя бы одну услугу и укажите количество."
         return True, ""
 
@@ -1020,9 +1314,13 @@ class WorkOrderApp:
         if is_company:
             customer_display = self.company_selected.get()
             plate_value = self.plate_list.get().strip()
+            trailer_value = self.trailer_list.get().strip() if hasattr(self, "trailer_list") else ""
+            if trailer_value == "Без прицепа":
+                trailer_value = ""
         else:
             customer_display = "Частное лицо"
             plate_value = self.plate_entry.get().strip()
+            trailer_value = ""
 
         if self.defect_choice.get() == "Другое (ввести вручную)":
             defect_value = self.defect_custom.get().strip()
@@ -1032,10 +1330,12 @@ class WorkOrderApp:
         data = {
             "customer_display": customer_display,
             "plate": plate_value,
+            "trailer": trailer_value,
             "driver_name": self.driver_name.get().strip(),
             "defect": defect_value,
             "issued_to": self.issued_to.get().strip(),
             "mechanic": self.mechanic.get().strip(),
+            "vehicle_type": self.vehicle_type.get(),
             "services": self._collect_services(),
         }
         return data

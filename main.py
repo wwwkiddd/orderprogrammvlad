@@ -49,8 +49,9 @@ CELL_ISSUED_TO = "N10"
 CELL_DATE = "CG4"
 CELL_TOTAL_NUM = "BR38"
 CELL_TOTAL_TEXT = "A39"
-# Верхняя левая ячейка объединённого диапазона для механика
 CELL_MECHANIC = "B43"
+
+
 
 SERVICES_START_ROW = 13
 COL_QTY = "BF"
@@ -192,6 +193,19 @@ def filter_companies(query: str) -> list[str]:
             result.append(name)
     return result
 
+
+def filter_companies(query: str) -> list[str]:
+    q = str(query).strip().lower()
+    if not q:
+        return list(ALL_COMPANY_NAMES)
+    result = []
+    for name in ALL_COMPANY_NAMES:
+        meta = COMPANIES.get(name, {})
+        plates = meta.get("plates", [])
+        if q in name.lower() or any(q in p.lower() for p in plates):
+            result.append(name)
+    return result
+
 # === Чек и текст суммы ===
 def ruble_suffix(n: int) -> str:
     n_abs = abs(n) % 100
@@ -247,14 +261,11 @@ def _write_to_excel(ws, data: dict) -> int:
     ws[CELL_CUSTOMER] = data["customer_display"]
     plate_text = data.get("plate", "")
     trailer = data.get("trailer", "")
-    codex/add-company-selection-by-vehicle-number-u66sol
     if trailer and trailer != "Без прицепа":
-
-    if trailer:
-
         plate_text = f"{plate_text}, {trailer}" if plate_text else trailer
     ws[CELL_PLATE] = plate_text
     ws[CELL_DRIVER] = data["driver_name"]
+
 
     defect_value = data["defect"]
     ws[CELL_DEFECT_LINE1] = "" if defect_value == "Пропустить" else defect_value
@@ -563,8 +574,8 @@ class WorkOrderApp:
         self.customer_type = tk.StringVar(value="Частное лицо")
         tb.Radiobutton(frm_customer, text="Частное лицо", variable=self.customer_type, value="Частное лицо", command=self._on_customer_type_changed).grid(row=0, column=0, sticky=NW, padx=4, pady=4)
         tb.Radiobutton(frm_customer, text="Компания", variable=self.customer_type, value="Компания", command=self._on_customer_type_changed).grid(row=0, column=1, sticky=NW, padx=4, pady=4)
-
         tb.Label(frm_customer, text="Поиск компании или номера (Ctrl+F):").grid(row=1, column=0, sticky=NW, padx=4, pady=4)
+
         self.company_query = tk.StringVar(value="")
         self.entry_company_query = tb.Entry(frm_customer, textvariable=self.company_query)
         self.entry_company_query.grid(row=1, column=1, sticky="we", padx=4, pady=4)
@@ -621,6 +632,7 @@ class WorkOrderApp:
         self.plate_list.grid(row=1, column=1, sticky="we", padx=4, pady=4)
         tb.Label(frm_plate, text="Номер прицепа (опционально):").grid(row=2, column=0, columnspan=2, sticky=NW, padx=4, pady=4)
         self.trailer_list.grid(row=3, column=0, columnspan=2, sticky="we", padx=4, pady=4)
+
 
         # Водитель
         frm_driver = tb.Labelframe(left, text="Ф.И.О. водителя", padding=8)
@@ -733,6 +745,7 @@ class WorkOrderApp:
         # форма может быть не открытой или уже закрыта
         if not hasattr(self, "cmb_company") or not self._widget_exists(self.cmb_company):
             return
+
         self.cmb_company["values"] = ALL_COMPANY_NAMES
         if ALL_COMPANY_NAMES:
             self.cmb_company.set(ALL_COMPANY_NAMES[0])
@@ -750,6 +763,7 @@ class WorkOrderApp:
             if hasattr(self, "search_results") and self._widget_exists(self.search_results):
                 self.search_results.set_items(values[:50], q.strip().lower())
         self._update_company_meta()
+
 
     # ======= Админ‑панель =======
     def open_admin_panel(self):
@@ -1018,9 +1032,6 @@ class WorkOrderApp:
                 self.plate_list.set("")
         if hasattr(self, "trailer_list") and self._widget_exists(self.trailer_list):
             trailers = ["Без прицепа"] + meta.get("trailers", [])
-
-            trailers = meta.get("trailers", [])
-
             self.trailer_list["values"] = trailers
             sel_trailer = ""
             for t in trailers:
@@ -1029,8 +1040,6 @@ class WorkOrderApp:
                     break
             if sel_trailer:
                 self.trailer_list.set(sel_trailer)
-            else:
-                self.trailer_list.set(trailers[0])
             elif trailers:
                 self.trailer_list.set(trailers[0])
             else:
@@ -1086,6 +1095,7 @@ class WorkOrderApp:
             return False, "Выберите хотя бы одну услугу и укажите количество."
         return True, ""
 
+
     def _gather_data(self) -> dict:
         is_company = (self.customer_type.get() == "Компания")
         if is_company:
@@ -1114,6 +1124,7 @@ class WorkOrderApp:
             "mechanic": self.mechanic.get().strip(),
             "services": self._collect_services(),
         }
+
         return data
 
     def _build_xlsx_only(self):

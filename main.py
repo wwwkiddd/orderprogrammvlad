@@ -247,7 +247,11 @@ def _write_to_excel(ws, data: dict) -> int:
     ws[CELL_CUSTOMER] = data["customer_display"]
     plate_text = data.get("plate", "")
     trailer = data.get("trailer", "")
+    codex/add-company-selection-by-vehicle-number-u66sol
     if trailer and trailer != "Без прицепа":
+
+    if trailer:
+
         plate_text = f"{plate_text}, {trailer}" if plate_text else trailer
     ws[CELL_PLATE] = plate_text
     ws[CELL_DRIVER] = data["driver_name"]
@@ -1014,6 +1018,9 @@ class WorkOrderApp:
                 self.plate_list.set("")
         if hasattr(self, "trailer_list") and self._widget_exists(self.trailer_list):
             trailers = ["Без прицепа"] + meta.get("trailers", [])
+
+            trailers = meta.get("trailers", [])
+
             self.trailer_list["values"] = trailers
             sel_trailer = ""
             for t in trailers:
@@ -1024,6 +1031,10 @@ class WorkOrderApp:
                 self.trailer_list.set(sel_trailer)
             else:
                 self.trailer_list.set(trailers[0])
+            elif trailers:
+                self.trailer_list.set(trailers[0])
+            else:
+                self.trailer_list.set("")
 
     def _on_customer_type_changed(self):
         is_company = (self.customer_type.get() == "Компания")

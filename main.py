@@ -49,7 +49,8 @@ CELL_ISSUED_TO = "N10"
 CELL_DATE = "CG4"
 CELL_TOTAL_NUM = "BR38"
 CELL_TOTAL_TEXT = "A39"
-CELL_MECHANIC = "W43"
+# Верхняя левая ячейка объединённого диапазона для механика
+CELL_MECHANIC = "B43"
 
 SERVICES_START_ROW = 13
 COL_QTY = "BF"
@@ -246,7 +247,11 @@ def _write_to_excel(ws, data: dict) -> int:
     ws[CELL_CUSTOMER] = data["customer_display"]
     plate_text = data.get("plate", "")
     trailer = data.get("trailer", "")
+    codex/add-company-selection-by-vehicle-number-u66sol
+    if trailer and trailer != "Без прицепа":
+
     if trailer:
+
         plate_text = f"{plate_text}, {trailer}" if plate_text else trailer
     ws[CELL_PLATE] = plate_text
     ws[CELL_DRIVER] = data["driver_name"]
@@ -1012,7 +1017,10 @@ class WorkOrderApp:
             else:
                 self.plate_list.set("")
         if hasattr(self, "trailer_list") and self._widget_exists(self.trailer_list):
+            trailers = ["Без прицепа"] + meta.get("trailers", [])
+
             trailers = meta.get("trailers", [])
+
             self.trailer_list["values"] = trailers
             sel_trailer = ""
             for t in trailers:
@@ -1021,6 +1029,8 @@ class WorkOrderApp:
                     break
             if sel_trailer:
                 self.trailer_list.set(sel_trailer)
+            else:
+                self.trailer_list.set(trailers[0])
             elif trailers:
                 self.trailer_list.set(trailers[0])
             else:
@@ -1082,6 +1092,8 @@ class WorkOrderApp:
             customer_display = self.company_selected.get()
             plate_value = self.plate_list.get().strip()
             trailer_value = self.trailer_list.get().strip() if hasattr(self, "trailer_list") else ""
+            if trailer_value == "Без прицепа":
+                trailer_value = ""
         else:
             customer_display = "Частное лицо"
             plate_value = self.plate_entry.get().strip()

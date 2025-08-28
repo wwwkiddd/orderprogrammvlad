@@ -47,6 +47,7 @@ if not COMPANIES_XLSX.exists():
 CELL_CUSTOMER = "I5"
 CELL_PLATE = "G6"
 CELL_DRIVER = "G7"
+
 CELL_DEFECT_LINE1 = "Y8"
 CELL_DEFECT_LINE2 = "A9"
 CELL_ISSUED_TO = "N10"
@@ -80,6 +81,7 @@ DEFECTS = [
     "Накачка шин",
     "Другое (ввести вручную)",
 ]
+
 
 SERVICES = [
     "Снятие/установка",
@@ -193,6 +195,107 @@ def reload_companies_globals():
     global COMPANIES, ALL_COMPANY_NAMES
     COMPANIES, ALL_COMPANY_NAMES = load_companies()
 
+
+def filter_companies(query: str) -> list[str]:
+    q = str(query).strip().lower()
+    if not q:
+        return list(ALL_COMPANY_NAMES)
+    result = []
+    for name in ALL_COMPANY_NAMES:
+        meta = COMPANIES.get(name, {})
+        plates = meta.get("plates", [])
+        if q in name.lower() or any(q in p.lower() for p in plates):
+            result.append(name)
+    return result
+
+# === Цены услуг и расходников ===
+def _parse_price_value(v):
+    if isinstance(v, str) and "/" in v:
+        parts = [p.strip() for p in v.split("/") if p.strip()]
+        if len(parts) == 2:
+            try:
+                return int(parts[0]), int(parts[1])
+            except Exception:
+                return 0
+    try:
+        return int(v)
+    except Exception:
+        return 0
+
+def load_price_table():
+    price = {"Легковой": {}, "Грузовой": {}}
+    if not PRICE_XLSX.exists():
+        return price
+    wb = load_workbook(PRICE_XLSX, data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+    if len(rows) < 3:
+        return price
+    # Определим столбцы цен для грузовых и легковых
+    header = rows[0]
+    truck_col = header.index("Грузовой") if "Грузовой" in header else 1
+    car_col = header.index("Легковой") if "Легковой" in header else 9
+    for r in rows[2:]:
+        name = str(r[0]).strip() if r and r[0] else ""
+        if not name:
+            continue
+        price["Грузовой"][name] = _parse_price_value(r[truck_col] if truck_col < len(r) else 0)
+        price["Легковой"][name] = _parse_price_value(r[car_col] if car_col < len(r) else 0)
+    return price
+
+def load_consumables_table():
+    data = {}
+    categories = []
+    if not CONSUMABLES_XLSX.exists():
+        return data, categories
+    wb = load_workbook(CONSUMABLES_XLSX, data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+    if len(rows) < 3:
+        return data, categories
+    header1 = rows[0]
+    header2 = rows[1]
+    for i in range(2, len(header1), 2):
+        cat = header1[i]
+        if cat:
+            categories.append(str(cat).strip())
+    for row in rows[2:]:
+        kind = row[0]
+        name = row[1]
+        if not kind or not name:
+            continue
+        kind = str(kind).strip()
+        name = str(name).strip()
+        data.setdefault(kind, {}).setdefault(name, {})
+        for idx, cat in enumerate(categories):
+            base = 2 + idx*2
+            cold = row[base]
+            hot = row[base+1] if base+1 < len(row) else None
+            if cold not in (None, ""):
+                data[kind][name][(cat, "холодная")] = _parse_price_value(cold)
+            if hot not in (None, ""):
+                data[kind][name][(cat, "горячая")] = _parse_price_value(hot)
+    return data, categories
+
+PRICE_TABLE = load_price_table()
+CONSUMABLES_TABLE, CONSUMABLE_CATEGORIES = load_consumables_table()
+
+CONSUMABLE_SERVICE_MAP = {
+    "Пластырь №": "Пластырь",
+    "Грибок №": "Грибок",
+    "Удлинитель": "Удлинитель",
+    "Грузики": "Грузики",
+    "Флипер": "Флипер",
+    "Камера": "Камера",
+}
+
+SERVICE_PRICE_NAME = {
+    "Снятие/установка": "Снятие, установка наружное/внутреннее",
+    "Вентиль легковой": "Вентиль легковой (хром/черный)",
+    "Пластырь №": "Пластырь",
+    "Грибок №": "Грибок",
+    "Удлинитель": "Удлинитель ",
+}
 
 def filter_companies(query: str) -> list[str]:
     q = str(query).strip().lower()
@@ -489,6 +592,7 @@ def export_pdf_via_libreoffice(xlsx_path: Path, pdf_path: Path) -> bool:
         return False
 
 # === Заполнение шаблона ===
+
 def _write_to_excel(ws, data: dict) -> int:
     ws[CELL_CUSTOMER] = data["customer_display"]
     plate_text = data.get("plate", "")
@@ -497,10 +601,6 @@ def _write_to_excel(ws, data: dict) -> int:
         plate_text = f"{plate_text}, {trailer}" if plate_text else trailer
     ws[CELL_PLATE] = plate_text
     ws[CELL_DRIVER] = data["driver_name"]
-
-
-
-
     defect_value = data["defect"]
     ws[CELL_DEFECT_LINE1] = "" if defect_value == "Пропустить" else defect_value
     ws[CELL_DEFECT_LINE2] = ""
@@ -508,7 +608,6 @@ def _write_to_excel(ws, data: dict) -> int:
     ws[CELL_ISSUED_TO] = data["issued_to"]
     ws[CELL_DATE] = datetime.datetime.now().strftime("%d.%m.%Y")
     ws[CELL_MECHANIC] = data["mechanic"]
-
     total = 0
     for idx, service_name in enumerate(SERVICES):
         row = SERVICES_START_ROW + idx
@@ -520,7 +619,6 @@ def _write_to_excel(ws, data: dict) -> int:
         ws[f"{COL_PRICE}{row}"] = price if qty else ""
         ws[f"{COL_COST}{row}"] = cost if qty else ""
         total += cost
-
 
     ws[CELL_TOTAL_NUM] = total
     ws[CELL_TOTAL_TEXT] = make_total_text(total)
@@ -771,6 +869,40 @@ class ConsumableDialog(tb.Toplevel):
         self.result = None
         self.grab_set()
         names = sorted(CONSUMABLES_TABLE.get(kind, {}).keys())
+        cats = list(CONSUMABLE_CATEGORIES)
+        temps = ["холодная", "горячая"]
+        self.vars = []
+        if not names or not cats:
+            tb.Label(self, text="Нет данных для расходников").grid(row=0, column=0, padx=10, pady=10)
+            tb.Button(self, text="OK", command=self.destroy).grid(row=1, column=0, pady=6)
+            return
+        for i in range(qty):
+            row = tb.Frame(self, padding=4)
+            row.grid(row=i, column=0, sticky="we")
+            name_var = tk.StringVar(value=names[0])
+            cat_var = tk.StringVar(value=cats[0])
+            temp_var = tk.StringVar(value=temps[0])
+            tb.Combobox(row, values=names, textvariable=name_var, state="readonly", width=20).pack(side=LEFT, padx=4)
+            tb.Combobox(row, values=cats, textvariable=cat_var, state="readonly", width=20).pack(side=LEFT, padx=4)
+            tb.Combobox(row, values=temps, textvariable=temp_var, state="readonly", width=12).pack(side=LEFT, padx=4)
+            self.vars.append((name_var, cat_var, temp_var))
+        btn = tb.Button(self, text="OK", command=self._ok)
+        btn.grid(row=qty, column=0, pady=6)
+
+    def _ok(self):
+        res = []
+        for n, c, t in self.vars:
+            res.append((n.get(), c.get(), t.get()))
+        self.result = res
+        self.destroy()
+
+class ConsumableDialog(tb.Toplevel):
+    def __init__(self, parent, kind: str, qty: int):
+        super().__init__(parent)
+        self.title(kind)
+        self.result = None
+        self.grab_set()
+        names = sorted(CONSUMABLES_TABLE.get(kind, {}).keys())
         cats = CONSUMABLE_CATEGORIES
         temps = ["холодная", "горячая"]
         self.vars = []
@@ -878,6 +1010,7 @@ class WorkOrderApp:
         tb.Label(frm_customer, text="Поиск компании или номера (Ctrl+F):").grid(row=1, column=0, sticky=NW, padx=4, pady=4)
 
         tb.Label(frm_customer, text="Поиск компании или номера (Ctrl+F):").grid(row=1, column=0, sticky=NW, padx=4, pady=4)
+        tb.Label(frm_customer, text="Поиск компании или номера (Ctrl+F):").grid(row=1, column=0, sticky=NW, padx=4, pady=4)
 
         self.company_query = tk.StringVar(value="")
         self.entry_company_query = tb.Entry(frm_customer, textvariable=self.company_query)
@@ -904,6 +1037,7 @@ class WorkOrderApp:
         self.company_inn_var = tk.StringVar(value="")
         tb.Label(frm_customer, textvariable=self.company_inn_var, bootstyle="secondary").grid(row=4, column=1, sticky="w", padx=4, pady=4)
 
+
         def apply_filter(*_):
             q = self.company_query.get()
             values = filter_companies(q)
@@ -914,9 +1048,6 @@ class WorkOrderApp:
                 self.cmb_company.set("")
             self.search_results.set_items(values[:50], q.strip().lower())
             self._update_company_meta()
-
-
-
 
         self._company_query_trace = self.company_query.trace_add("write", apply_filter)
         self.cmb_company.bind("<<ComboboxSelected>>", lambda e: self._update_company_meta())
@@ -937,7 +1068,6 @@ class WorkOrderApp:
         self.plate_list.grid(row=1, column=1, sticky="we", padx=4, pady=4)
         tb.Label(frm_plate, text="Номер прицепа (опционально):").grid(row=2, column=0, columnspan=2, sticky=NW, padx=4, pady=4)
         self.trailer_list.grid(row=3, column=0, columnspan=2, sticky="we", padx=4, pady=4)
-
 
         # Водитель
         frm_driver = tb.Labelframe(left, text="Ф.И.О. водителя", padding=8)
@@ -981,7 +1111,6 @@ class WorkOrderApp:
         tb.Label(frm_people, text="Фамилия механика:").grid(row=1, column=0, sticky=NW, padx=4, pady=4)
         tb.Entry(frm_people, textvariable=self.mechanic).grid(row=1, column=1, sticky="we", padx=4, pady=4)
 
-
         # ===== Правая колонка =====
         frm_vehicle = tb.Labelframe(right, text="Тип автомобиля", padding=8)
         frm_vehicle.grid(row=0, column=0, sticky="we", **pad)
@@ -1000,6 +1129,7 @@ class WorkOrderApp:
         header.grid(row=0, column=0, sticky="we")
         header.grid_columnconfigure(0, weight=1)
         tb.Label(header, text="Услуга").grid(row=0, column=0, sticky="w", padx=4, pady=2)
+
         tb.Label(header, text="Кол-во").grid(row=0, column=1, sticky="w", padx=4, pady=2)
         tb.Label(header, text="Цена (шт)").grid(row=0, column=2, sticky="w", padx=4, pady=2)
 
@@ -1062,7 +1192,6 @@ class WorkOrderApp:
         # форма может быть не открытой или уже закрыта
         if not hasattr(self, "cmb_company") or not self._widget_exists(self.cmb_company):
             return
-
         self.cmb_company["values"] = ALL_COMPANY_NAMES
         if ALL_COMPANY_NAMES:
             self.cmb_company.set(ALL_COMPANY_NAMES[0])
@@ -1080,7 +1209,6 @@ class WorkOrderApp:
             if hasattr(self, "search_results") and self._widget_exists(self.search_results):
                 self.search_results.set_items(values[:50], q.strip().lower())
         self._update_company_meta()
-
 
     # ======= Админ‑панель =======
     def open_admin_panel(self):
@@ -1413,8 +1541,8 @@ class WorkOrderApp:
 
     def _ask_consumables(self, kind: str, qty: int):
         global CONSUMABLES_TABLE, CONSUMABLE_CATEGORIES
-        if not CONSUMABLES_TABLE or not CONSUMABLE_CATEGORIES:
-            CONSUMABLES_TABLE, CONSUMABLE_CATEGORIES = load_consumables_table()
+        # перечитываем файл, чтобы гарантировать актуальные данные
+        CONSUMABLES_TABLE, CONSUMABLE_CATEGORIES = load_consumables_table()
         dlg = ConsumableDialog(self._form_parent, kind, qty)
         self._form_parent.wait_window(dlg)
         return dlg.result or []
@@ -1434,6 +1562,8 @@ class WorkOrderApp:
             if name == "Снятие/установка":
                 outer, inner = self._ask_split_service(name, ["наружное", "внутреннее"], qty)
                 price = PRICE_TABLE.get(vt, {}).get(base_name, (0,0))
+                if isinstance(price, int):
+                    price = (price, price)
                 cost = outer*price[0] + inner*price[1]
                 total_qty = outer + inner
                 if total_qty > 0:
@@ -1471,8 +1601,6 @@ class WorkOrderApp:
                 selected[name] = {"qty": qty, "price": price, "cost": cost}
         return selected
 
-
-
     def _validate(self) -> tuple[bool, str]:
         if self.customer_type.get() == "Компания":
             if not getattr(self, "company_selected", tk.StringVar()).get():
@@ -1496,7 +1624,6 @@ class WorkOrderApp:
             return False, "Введите фамилию исполнителя ('Наряд выдан')."
         if not self.mechanic.get().strip():
             return False, "Введите фамилию механика."
-
         if not any(self.services_vars[name].get() and int(self.services_qty[name].get()) > 0 for name in SERVICES):
             return False, "Выберите хотя бы одну услугу и укажите количество."
         return True, ""
@@ -1513,7 +1640,6 @@ class WorkOrderApp:
             customer_display = "Частное лицо"
             plate_value = self.plate_entry.get().strip()
             trailer_value = ""
-
 
         if self.defect_choice.get() == "Другое (ввести вручную)":
             defect_value = self.defect_custom.get().strip()
@@ -1532,7 +1658,6 @@ class WorkOrderApp:
             "services": self._collect_services(),
         }
         return data
-
 
     def _build_xlsx_only(self):
         ok, msg = self._validate()
